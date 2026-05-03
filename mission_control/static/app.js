@@ -469,6 +469,9 @@ function refreshAllSettingsFromStorage() {
   if (pUnit) pUnit.value = procMemUnit;
   syncProcMemUnitFieldVisibility();
 
+  const procFooter = document.getElementById("proc-footer-rss-total");
+  if (procFooter) procFooter.checked = loadProcFooterRssTotalVisible();
+
   document.querySelectorAll("#panel-visibility-checks input[type=checkbox]").forEach((input) => {
     const id = input.dataset.panelId;
     if (!id) return;
@@ -800,6 +803,15 @@ let aptPackagesExpanded = false;
 /** @type {"asc"|"desc"} */
 let aptPkgSortDir = "asc";
 const PROC_PREFS_KEY = "mc-proc-prefs";
+const PROC_FOOTER_RSS_TOTAL_KEY = "mc-proc-footer-rss-total";
+
+function loadProcFooterRssTotalVisible() {
+  try {
+    return localStorage.getItem(PROC_FOOTER_RSS_TOTAL_KEY) !== "0";
+  } catch (_) {
+    return true;
+  }
+}
 
 function loadProcPrefs() {
   try {
@@ -959,6 +971,7 @@ const MC_SETTINGS_KEYS = [
   APT_PKG_SEARCH_KEY,
   APT_PKG_SORT_DIR_KEY,
   PROC_PREFS_KEY,
+  PROC_FOOTER_RSS_TOTAL_KEY,
   PROC_MEM_UNIT_KEY,
   PROC_MEM_DISPLAY_KEY,
   PROC_SORT_KEYDIR_KEY,
@@ -1149,6 +1162,19 @@ function renderProcsTable() {
     )
     .join("");
 
+  const totalRss = shown.reduce((s, p) => s + (Number(p.memory_rss) || 0), 0);
+  const footer =
+    loadProcFooterRssTotalVisible()
+      ? `<tfoot><tr class="proc-tfoot-row">
+      <td class="proc-td-pid"></td>
+      <td class="proc-td-name proc-tfoot-label">Total · ${shown.length} shown</td>
+      <td class="proc-td-metric proc-tfoot-metric">—</td>
+      <td class="proc-td-metric proc-td-mem proc-tfoot-mem"><span class="proc-mem-abs">${escapeHtml(
+        fmtProcMemAbs(totalRss)
+      )}</span></td>
+    </tr></tfoot>`
+      : "";
+
   wrap.innerHTML =
     meta +
     `<table class="mc-table mc-table-procs"><colgroup>
@@ -1161,7 +1187,7 @@ function renderProcsTable() {
       <th class="proc-th proc-th-name proc-sortable" scope="col" data-sort-key="name" role="columnheader" tabindex="0" aria-sort="${procSortAriaSort("name")}">Name${procSortArrowHtml("name")}</th>
       <th class="proc-th proc-th-metric proc-sortable" scope="col" data-sort-key="cpu" role="columnheader" tabindex="0" aria-sort="${procSortAriaSort("cpu")}">CPU${procSortArrowHtml("cpu")}</th>
       <th class="proc-th proc-th-metric proc-sortable" scope="col" data-sort-key="mem" role="columnheader" tabindex="0" aria-sort="${procSortAriaSort("mem")}">MEM${procSortArrowHtml("mem")}</th>
-    </tr></thead><tbody>${rows}</tbody></table>`;
+    </tr></thead><tbody>${rows}</tbody>${footer}</table>`;
 }
 
 function initProcessControls() {
@@ -1170,6 +1196,18 @@ function initProcessControls() {
   initProcSortHeaderClicks();
   const search = document.getElementById("proc-search");
   const limit = document.getElementById("proc-limit");
+  const footerChk = document.getElementById("proc-footer-rss-total");
+  if (footerChk) {
+    footerChk.checked = loadProcFooterRssTotalVisible();
+    footerChk.addEventListener("change", () => {
+      try {
+        localStorage.setItem(PROC_FOOTER_RSS_TOTAL_KEY, footerChk.checked ? "1" : "0");
+      } catch (_) {
+        /* ignore */
+      }
+      renderProcsTable();
+    });
+  }
   const debouncedSaveSearch = debounce(() => saveProcPrefs(), 400);
   search?.addEventListener("input", () => {
     renderProcsTable();

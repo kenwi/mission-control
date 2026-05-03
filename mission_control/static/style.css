@@ -752,6 +752,33 @@ table.mc-table.mc-table-procs {
   max-width: 0;
 }
 
+.mc-table-procs tfoot .proc-tfoot-row td {
+  border-bottom: none;
+}
+
+.mc-table-procs .proc-tfoot-label {
+  padding-top: 0.55rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.mc-table-procs .proc-tfoot-metric,
+.mc-table-procs .proc-tfoot-mem {
+  padding-top: 0.55rem;
+  border-top: 1px solid var(--border);
+}
+
+.mc-table-procs .proc-tfoot-row .proc-td-pid {
+  border-top: 1px solid var(--border);
+}
+
+.mc-table-procs .proc-tfoot-row .proc-td-name {
+  border-top: 1px solid var(--border);
+}
+
 table.mc-table {
   width: 100%;
   border-collapse: collapse;
