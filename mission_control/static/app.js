@@ -317,6 +317,9 @@ const STORAGE_DISK_IO_COLLAPSED_KEY = "mc-storage-disk-io-collapsed";
 const THERMAL_FANS_COLLAPSED_KEY = "mc-thermal-fans-collapsed";
 const NETWORK_INTERFACES_COLLAPSED_KEY = "mc-network-interfaces-collapsed";
 const NETWORK_LISTEN_PORTS_COLLAPSED_KEY = "mc-network-listen-ports-collapsed";
+const LISTEN_PORTS_SEARCH_KEY = "mc-listen-ports-search";
+const LISTEN_PORTS_PROTO_FILTER_KEY = "mc-listen-ports-proto-filter";
+const LISTEN_PORTS_FAMILY_FILTER_KEY = "mc-listen-ports-family-filter";
 const STORAGE_MOUNTS_COLLAPSED_KEY = "mc-storage-mounts-collapsed";
 const STORAGE_ZFS_COLLAPSED_KEY = "mc-storage-zfs-collapsed";
 
@@ -811,7 +814,8 @@ function refreshAllSettingsFromStorage() {
   renderDisks(lastDisks);
   renderZfsPools(lastZfsPools);
   renderNet(lastNetwork);
-  renderListeningPorts(lastListeningPorts);
+  loadListenPortsToolbarIntoDom();
+  renderListenPortsTableContent();
   renderDiskIo(lastDiskIo);
   renderThermal(lastThermal);
   renderFans(lastFans);
@@ -2488,7 +2492,7 @@ function onListenPortsColumnHeaderClick(key) {
     listenPortsSortDir = defaultDirForListenPortsColumn(c);
   }
   saveListenPortsSortKeyDir();
-  renderListeningPorts(lastListeningPorts);
+  renderListenPortsTableContent();
 }
 
 function listenPortsSortAriaSort(col) {
@@ -2642,6 +2646,7 @@ function initNetworkPanel() {
     "netListenPortsSubBound",
     undefined
   );
+  initListenPortsToolbar();
 }
 
 function renderNet(net) {
@@ -2686,22 +2691,99 @@ function renderNet(net) {
     </tr></thead><tbody>${rows}</tbody></table>`;
 }
 
-function renderListeningPorts(data) {
-  const wrap = document.getElementById("net-listen-ports-table");
-  if (!wrap) return;
-  let noteHtml = "";
-  if (data && data.note) {
-    noteHtml = `<p class="tile-meta mc-listen-ports-note">${escapeHtml(data.note)}</p>`;
+let listenPortsSearchDebounceTimer = null;
+
+function normalizeListenPortsProtoFilter(v) {
+  const s = String(v || "").toLowerCase();
+  if (s === "tcp" || s === "udp") return s;
+  return "all";
+}
+
+function normalizeListenPortsFamilyFilter(v) {
+  const s = String(v || "").toLowerCase();
+  if (s === "ipv4" || s === "ipv6" || s === "other") return s;
+  return "all";
+}
+
+function loadListenPortsToolbarIntoDom() {
+  const searchEl = document.getElementById("net-listen-ports-search");
+  const protoEl = document.getElementById("net-listen-ports-proto");
+  const famEl = document.getElementById("net-listen-ports-family");
+  if (!searchEl || !protoEl || !famEl) return;
+  let s = "";
+  let p = "all";
+  let f = "all";
+  try {
+    s = localStorage.getItem(LISTEN_PORTS_SEARCH_KEY) || "";
+  } catch (_) {
+    /* ignore */
   }
+  try {
+    p = normalizeListenPortsProtoFilter(localStorage.getItem(LISTEN_PORTS_PROTO_FILTER_KEY));
+  } catch (_) {
+    /* ignore */
+  }
+  try {
+    f = normalizeListenPortsFamilyFilter(localStorage.getItem(LISTEN_PORTS_FAMILY_FILTER_KEY));
+  } catch (_) {
+    /* ignore */
+  }
+  searchEl.value = s;
+  protoEl.value = p === "tcp" || p === "udp" ? p : "all";
+  famEl.value = ["ipv4", "ipv6", "other"].includes(f) ? f : "all";
+}
+
+function getListenPortsFiltersFromDom() {
+  const searchEl = document.getElementById("net-listen-ports-search");
+  const protoEl = document.getElementById("net-listen-ports-proto");
+  const famEl = document.getElementById("net-listen-ports-family");
+  return {
+    search: searchEl ? searchEl.value : "",
+    proto: normalizeListenPortsProtoFilter(protoEl && protoEl.value),
+    family: normalizeListenPortsFamilyFilter(famEl && famEl.value),
+  };
+}
+
+function listenPortsSearchTermsFromQuery(q) {
+  return String(q || "")
+    .trim()
+    .toLowerCase()
+    .split(/\s+/)
+    .filter(Boolean);
+}
+
+function listenPortsRowMatchesSearch(row, terms) {
+  if (!terms.length) return true;
+  const hay = [
+    row.local_ip || "",
+    String(
+      row.local_port != null && Number.isFinite(Number(row.local_port)) ? row.local_port : ""
+    ),
+    row.process || "",
+  ]
+    .join(" ")
+    .toLowerCase();
+  return terms.every((t) => hay.includes(t));
+}
+
+function filterListenPortsNormalizedList(list, filters) {
+  let out = list;
+  if (filters.proto !== "all") {
+    out = out.filter((r) => r.proto === filters.proto);
+  }
+  if (filters.family !== "all") {
+    out = out.filter((r) => r.family === filters.family);
+  }
+  const terms = listenPortsSearchTermsFromQuery(filters.search);
+  if (terms.length) {
+    out = out.filter((r) => listenPortsRowMatchesSearch(r, terms));
+  }
+  return out;
+}
+
+function normalizeListenPortsRows(data) {
   const rowsArr = data && Array.isArray(data.rows) ? data.rows : [];
-  if (!rowsArr.length) {
-    const emptyMsg = noteHtml
-      ? noteHtml
-      : "<p class=\"tile-meta\">No listening TCP or bound UDP sockets reported.</p>";
-    wrap.innerHTML = emptyMsg;
-    return;
-  }
-  const list = rowsArr.map((r) => ({
+  return rowsArr.map((r) => ({
     proto: String(r.proto || "").toLowerCase(),
     family: String(r.family || ""),
     local_ip: String(r.local_ip != null ? r.local_ip : ""),
@@ -2710,8 +2792,35 @@ function renderListeningPorts(data) {
     process: r.process != null ? String(r.process) : null,
     fd: r.fd != null && Number.isFinite(Number(r.fd)) ? Number(r.fd) : null,
   }));
-  list.sort(cmpListenPortsRows);
-  const body = list
+}
+
+function renderListenPortsTableContent() {
+  const wrap = document.getElementById("net-listen-ports-table");
+  if (!wrap) return;
+  const data = lastListeningPorts;
+  let noteHtml = "";
+  if (data && data.note) {
+    noteHtml = `<p class="tile-meta mc-listen-ports-note">${escapeHtml(data.note)}</p>`;
+  }
+  const list = normalizeListenPortsRows(data);
+  const filters = getListenPortsFiltersFromDom();
+  const filtered = filterListenPortsNormalizedList(list, filters);
+  filtered.sort(cmpListenPortsRows);
+
+  if (!list.length) {
+    const emptyMsg = noteHtml
+      ? noteHtml
+      : "<p class=\"tile-meta\">No listening TCP or bound UDP sockets reported.</p>";
+    wrap.innerHTML = emptyMsg;
+    return;
+  }
+
+  if (!filtered.length) {
+    wrap.innerHTML = `${noteHtml}<p class="tile-meta">No rows match the current search or filters.</p>`;
+    return;
+  }
+
+  const body = filtered
     .map((row) => {
       const lip = row.local_ip || "—";
       const portDisp =
@@ -2739,6 +2848,54 @@ function renderListeningPorts(data) {
       <th class="net-port-th net-ports-sortable net-port-th-proc" scope="col" data-sort-key="process" role="columnheader" tabindex="0" aria-sort="${listenPortsSortAriaSort("process")}">Process${listenPortsSortArrowHtml("process")}</th>
       <th class="net-port-th net-ports-sortable net-port-th-num" scope="col" data-sort-key="fd" role="columnheader" tabindex="0" title="File descriptor" aria-sort="${listenPortsSortAriaSort("fd")}">FD${listenPortsSortArrowHtml("fd")}</th>
     </tr></thead><tbody>${body}</tbody></table>`;
+}
+
+function renderListeningPorts(data) {
+  lastListeningPorts = data ?? null;
+  renderListenPortsTableContent();
+}
+
+function initListenPortsToolbar() {
+  const tb = document.getElementById("net-listen-ports-toolbar");
+  if (!tb || tb.dataset.listenPortsToolbarBound === "1") return;
+  tb.dataset.listenPortsToolbarBound = "1";
+  loadListenPortsToolbarIntoDom();
+  const searchEl = document.getElementById("net-listen-ports-search");
+  const protoEl = document.getElementById("net-listen-ports-proto");
+  const famEl = document.getElementById("net-listen-ports-family");
+  searchEl?.addEventListener("input", () => {
+    clearTimeout(listenPortsSearchDebounceTimer);
+    listenPortsSearchDebounceTimer = setTimeout(() => {
+      try {
+        localStorage.setItem(LISTEN_PORTS_SEARCH_KEY, searchEl.value);
+      } catch (_) {
+        /* ignore */
+      }
+      renderListenPortsTableContent();
+    }, 200);
+  });
+  protoEl?.addEventListener("change", () => {
+    try {
+      localStorage.setItem(
+        LISTEN_PORTS_PROTO_FILTER_KEY,
+        normalizeListenPortsProtoFilter(protoEl.value)
+      );
+    } catch (_) {
+      /* ignore */
+    }
+    renderListenPortsTableContent();
+  });
+  famEl?.addEventListener("change", () => {
+    try {
+      localStorage.setItem(
+        LISTEN_PORTS_FAMILY_FILTER_KEY,
+        normalizeListenPortsFamilyFilter(famEl.value)
+      );
+    } catch (_) {
+      /* ignore */
+    }
+    renderListenPortsTableContent();
+  });
 }
 
 const DISK_IO_SORT_KEYDIR_KEY = "mc-disk-io-sort-keydir";
@@ -3896,6 +4053,9 @@ const MC_SETTINGS_KEYS = [
   NET_RATE_UNIT_KEY,
   NET_SORT_KEYDIR_KEY,
   LISTEN_PORTS_SORT_KEYDIR_KEY,
+  LISTEN_PORTS_SEARCH_KEY,
+  LISTEN_PORTS_PROTO_FILTER_KEY,
+  LISTEN_PORTS_FAMILY_FILTER_KEY,
   MODAL_WIDTH_KEY,
   CONTENT_LAYOUT_MAX_KEY,
   CONTENT_PADDING_KEY,

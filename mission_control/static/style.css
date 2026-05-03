@@ -1061,6 +1061,11 @@ table.mc-table.mc-table-procs {
   color: var(--warn);
 }
 
+.storage-subsection-body .net-listen-ports-toolbar {
+  margin-bottom: 0.65rem;
+  flex-wrap: wrap;
+}
+
 .mc-table-disk-io th.disk-io-sortable {
   cursor: pointer;
   user-select: none;
