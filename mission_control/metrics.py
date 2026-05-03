@@ -903,6 +903,243 @@ class NetRateState:
         return {**current, "rates": rates}
 
 
+_DISKSTATS_SKIP_PREFIX = ("loop", "ram", "fd", "sr")
+
+
+def _read_diskstats() -> dict[str, Any]:
+    """Parse ``/proc/diskstats`` into cumulative read/write bytes (sectors × 512)."""
+    now = time.time()
+    devices: dict[str, dict[str, int]] = {}
+    path = Path("/proc/diskstats")
+    if not path.is_file():
+        return {"ts": now, "devices": {}}
+    sector_b = 512
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return {"ts": now, "devices": {}}
+    for line in text.splitlines():
+        parts = line.split()
+        if len(parts) < 11:
+            continue
+        dev_name = parts[2]
+        if dev_name.startswith(_DISKSTATS_SKIP_PREFIX):
+            continue
+        try:
+            read_sectors = int(parts[5])
+            write_sectors = int(parts[9])
+        except ValueError:
+            continue
+        devices[dev_name] = {
+            "read_bytes": read_sectors * sector_b,
+            "write_bytes": write_sectors * sector_b,
+        }
+    return {"ts": now, "devices": devices}
+
+
+def _hwmon_detail_key(chip: str, label: str) -> str | None:
+    """Map psutil chip + label to ``hwmon:hwmonN:tempM`` for sysfs detail lookup."""
+    chip_s = (chip or "").strip()
+    label_s = (label or "").strip()
+    root = Path("/sys/class/hwmon")
+    if not root.is_dir():
+        return None
+    for hw in sorted(root.glob("hwmon*")):
+        name_f = hw / "name"
+        if not name_f.is_file():
+            continue
+        try:
+            hwname = name_f.read_text(encoding="utf-8", errors="replace").strip()
+        except OSError:
+            continue
+        if chip_s and hwname != chip_s and chip_s not in hwname and hwname not in chip_s:
+            continue
+        for inp in sorted(hw.glob("temp*_input")):
+            stem = inp.name.replace("_input", "")
+            label_f = hw / f"{stem}_label"
+            file_lbl = ""
+            if label_f.is_file():
+                try:
+                    file_lbl = label_f.read_text(encoding="utf-8", errors="replace").strip()
+                except OSError:
+                    pass
+            if label_s:
+                if file_lbl != label_s:
+                    continue
+            elif file_lbl:
+                continue
+            return f"hwmon:{hw.name}:{stem}"
+    return None
+
+
+_DETAIL_THERMAL_ZONE = re.compile(r"^zone:(thermal_zone\d+)$")
+_DETAIL_HWMON = re.compile(r"^hwmon:(hwmon\d+):(temp\d+)$")
+
+
+def collect_thermal_detail(detail_key: str) -> dict[str, Any] | None:
+    """Live sysfs fields for one thermal zone or hwmon temp channel."""
+    raw = (detail_key or "").strip()
+    if not raw:
+        return None
+    ts = time.time()
+    m = _DETAIL_THERMAL_ZONE.match(raw)
+    if m:
+        zname = m.group(1)
+        base = Path("/sys/class/thermal") / zname
+        if not base.is_dir():
+            return None
+        out: dict[str, Any] = {
+            "kind": "thermal_zone",
+            "detail_key": raw,
+            "path": str(base),
+            "ts": ts,
+            "fields": {},
+        }
+        try:
+            for p in sorted(base.iterdir()):
+                if not p.is_file():
+                    continue
+                if p.name in ("uevent",):
+                    continue
+                try:
+                    txt = p.read_text(encoding="utf-8", errors="replace").strip()
+                except OSError:
+                    continue
+                if len(txt) > 4000:
+                    txt = txt[:4000] + "…"
+                out["fields"][p.name] = txt
+        except OSError:
+            pass
+        return out
+    m = _DETAIL_HWMON.match(raw)
+    if m:
+        hwname, tempidx = m.group(1), m.group(2)
+        base = Path("/sys/class/hwmon") / hwname
+        if not base.is_dir():
+            return None
+        out = {
+            "kind": "hwmon",
+            "detail_key": raw,
+            "path": str(base),
+            "ts": ts,
+            "fields": {},
+        }
+        for fn in (
+            f"{tempidx}_input",
+            f"{tempidx}_label",
+            f"{tempidx}_max",
+            f"{tempidx}_min",
+            f"{tempidx}_crit",
+            f"{tempidx}_lcrit",
+            f"{tempidx}_emergency",
+            f"{tempidx}_offset",
+        ):
+            fp = base / fn
+            if fp.is_file():
+                try:
+                    out["fields"][fn] = fp.read_text(encoding="utf-8", errors="replace").strip()
+                except OSError:
+                    pass
+        nf = base / "name"
+        if nf.is_file():
+            try:
+                out["hwmon_chip_name"] = nf.read_text(encoding="utf-8", errors="replace").strip()
+            except OSError:
+                pass
+        return out
+    return None
+
+
+def _thermal_sensors() -> dict[str, Any]:
+    """Temperatures from psutil hwmon and ``/sys/class/thermal`` zones."""
+    ts = time.time()
+    out: dict[str, Any] = {"ts": ts, "chips": {}, "zones": []}
+    try:
+        temps = psutil.sensors_temperatures()  # type: ignore[attr-defined]
+    except (AttributeError, NotImplementedError, OSError, RuntimeError):
+        temps = None
+    if temps:
+        for chip, entries in temps.items():
+            readings: list[dict[str, Any]] = []
+            for e in entries or []:
+                try:
+                    cur = e.current
+                except AttributeError:
+                    continue
+                if cur is None:
+                    continue
+                row: dict[str, Any] = {
+                    "label": getattr(e, "label", "") or "",
+                    "current_c": round(float(cur), 1),
+                }
+                high = getattr(e, "high", None)
+                crit = getattr(e, "critical", None)
+                if high is not None:
+                    row["high_c"] = round(float(high), 1)
+                if crit is not None:
+                    row["critical_c"] = round(float(crit), 1)
+                dk = _hwmon_detail_key(str(chip), row["label"])
+                if dk:
+                    row["detail_key"] = dk
+                readings.append(row)
+            if readings:
+                out["chips"][str(chip)] = readings
+    try:
+        tz_root = Path("/sys/class/thermal")
+        if tz_root.is_dir():
+            for z in sorted(tz_root.glob("thermal_zone*")):
+                tfile = z / "temp"
+                if not tfile.is_file():
+                    continue
+                try:
+                    raw = int(tfile.read_text().strip())
+                except ValueError:
+                    continue
+                typ = z / "type"
+                tname = (
+                    typ.read_text(encoding="utf-8", errors="replace").strip()
+                    if typ.is_file()
+                    else z.name
+                )
+                out["zones"].append(
+                    {
+                        "name": tname,
+                        "current_c": round(raw / 1000.0, 1),
+                        "detail_key": f"zone:{z.name}",
+                    }
+                )
+    except OSError:
+        pass
+    return out
+
+
+@dataclass
+class DiskIoState:
+    last: dict[str, Any] | None = None
+    last_rates: dict[str, dict[str, float]] | None = None
+
+    def with_rates(self, current: dict[str, Any]) -> dict[str, Any]:
+        prev = self.last
+        self.last = current
+        if not prev:
+            self.last_rates = {}
+            return {**current, "rates": {}}
+        dt = max(current["ts"] - prev["ts"], 1e-6)
+        rates: dict[str, dict[str, float]] = {}
+        cur_d = current.get("devices", {})
+        prev_d = prev.get("devices", {})
+        for name in cur_d:
+            if name not in prev_d:
+                continue
+            c, p = cur_d[name], prev_d[name]
+            rates[name] = {
+                "read_bps": max(0, (c["read_bytes"] - p["read_bytes"]) / dt),
+                "write_bps": max(0, (c["write_bytes"] - p["write_bytes"]) / dt),
+            }
+        self.last_rates = rates
+        return {**current, "rates": rates}
+
+
 _slow_metrics_cache: dict[str, Any] = {
     "systemd_failed": None,
     "apt_upgradable": None,
@@ -913,6 +1150,7 @@ _slow_metrics_cache: dict[str, Any] = {
 def collect_snapshot(
     cpu_sample_interval: float | None,
     net_state: NetRateState,
+    disk_io_state: DiskIoState,
     *,
     include_slow: bool = False,
     include_processes: bool = True,
@@ -926,6 +1164,8 @@ def collect_snapshot(
 
     net_raw = _net_io()
     net = net_state.with_rates(net_raw)
+    disk_raw = _read_diskstats()
+    disk_io = disk_io_state.with_rates(disk_raw)
 
     data: dict[str, Any] = {
         "ts": time.time(),
@@ -951,6 +1191,8 @@ def collect_snapshot(
         "disk": _disk_mounts(),
         "zfs_pools": _zfs_pool_summaries(),
         "network": net,
+        "disk_io": disk_io,
+        "thermal": _thermal_sensors(),
         "processes": _top_processes(process_sample_limit) if include_processes else [],
     }
 

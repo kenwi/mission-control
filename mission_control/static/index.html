@@ -208,6 +208,17 @@
       </div>
     </section>
 
+    <section class="panel panel-wide" data-panel-id="thermal" aria-labelledby="panel-title-thermal">
+      <div class="panel-head">
+        <button type="button" class="panel-drag" draggable="true" aria-label="Drag to reorder section" title="Drag to reorder">≡</button>
+        <h2 id="panel-title-thermal" class="panel-title">Thermal</h2>
+        <button type="button" class="panel-collapse" aria-expanded="true" aria-controls="panel-body-thermal">−</button>
+      </div>
+      <div class="panel-body" id="panel-body-thermal">
+        <div id="thermal-table" class="table-wrap"></div>
+      </div>
+    </section>
+
     <section class="panel panel-wide" data-panel-id="operations" aria-labelledby="panel-title-operations">
       <div class="panel-head">
         <button type="button" class="panel-drag" draggable="true" aria-label="Drag to reorder section" title="Drag to reorder">≡</button>
@@ -248,6 +259,17 @@
           <h3 class="zfs-pools-heading">ZFS pools</h3>
           <div id="zfs-pools-table" class="table-wrap"></div>
         </div>
+      </div>
+    </section>
+
+    <section class="panel panel-wide" data-panel-id="disk_io" aria-labelledby="panel-title-disk-io">
+      <div class="panel-head">
+        <button type="button" class="panel-drag" draggable="true" aria-label="Drag to reorder section" title="Drag to reorder">≡</button>
+        <h2 id="panel-title-disk-io" class="panel-title">Disk I/O</h2>
+        <button type="button" class="panel-collapse" aria-expanded="true" aria-controls="panel-body-disk-io">−</button>
+      </div>
+      <div class="panel-body" id="panel-body-disk-io">
+        <div id="disk-io-table" class="table-wrap"></div>
       </div>
     </section>
 
@@ -343,6 +365,23 @@
       <button type="button" id="zpool-detail-close" class="mc-modal-close" aria-label="Close pool details">×</button>
     </div>
     <div id="zpool-detail-body" class="mc-modal-body"></div>
+  </div>
+
+  <div id="thermal-detail-backdrop" class="mc-modal-backdrop" hidden aria-hidden="true"></div>
+  <div
+    id="thermal-detail-dialog"
+    class="mc-modal"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="thermal-detail-title"
+    hidden
+    aria-hidden="true"
+  >
+    <div class="mc-modal-head">
+      <h2 id="thermal-detail-title" class="mc-modal-title">Sensor</h2>
+      <button type="button" id="thermal-detail-close" class="mc-modal-close" aria-label="Close sensor details">×</button>
+    </div>
+    <div id="thermal-detail-body" class="mc-modal-body"></div>
   </div>
 
   <div id="net-detail-backdrop" class="mc-modal-backdrop" hidden aria-hidden="true"></div>

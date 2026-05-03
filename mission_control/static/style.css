@@ -1017,6 +1017,86 @@ table.mc-table.mc-table-procs {
   line-height: 1.35;
 }
 
+.mc-table-disk-io th.disk-io-sortable {
+  cursor: pointer;
+  user-select: none;
+}
+
+.mc-table-disk-io th.disk-io-sortable:hover {
+  color: var(--text);
+}
+
+.mc-table-disk-io .disk-io-th-metric,
+.mc-table-disk-io .disk-io-td-metric {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.mc-table-disk-io .disk-io-td-name {
+  text-align: left;
+  font-family: var(--font-mono);
+  font-size: 0.88em;
+}
+
+.mc-table-thermal th.thermal-sortable {
+  cursor: pointer;
+  user-select: none;
+}
+
+.mc-table-thermal th.thermal-sortable:hover {
+  color: var(--text);
+}
+
+.mc-table-thermal tbody tr.thermal-row-detail {
+  cursor: pointer;
+}
+
+.mc-table-thermal tbody tr.thermal-row-detail:hover {
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+}
+
+.mc-table-thermal tbody tr.thermal-row-detail:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  outline-offset: -2px;
+}
+
+.mc-table-thermal .thermal-th-metric,
+.mc-table-thermal .thermal-td-metric {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.mc-table-thermal .thermal-td-name {
+  text-align: left;
+  max-width: 18rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mc-table-thermal .thermal-td-meta {
+  text-align: left;
+  font-size: 0.84em;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.mc-table-thermal .thermal-td-warn {
+  color: var(--warn);
+  font-weight: 600;
+}
+
+.mc-table-thermal .thermal-td-crit {
+  color: var(--crit);
+  font-weight: 600;
+}
+
+.mc-table-thermal .thermal-th-meta {
+  text-align: left;
+}
+
 .zfs-pools-block {
   margin-top: 1.15rem;
 }

@@ -12,11 +12,13 @@ from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from mission_control.metrics import (
+    DiskIoState,
     NetRateState,
     collect_interface_detail,
     collect_mount_detail,
     collect_process_detail,
     collect_snapshot,
+    collect_thermal_detail,
     collect_zpool_detail,
 )
 
@@ -24,6 +26,7 @@ STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 app = FastAPI(title="Mission Control", version="0.1.0")
 _net_state = NetRateState()
+_disk_io_state = DiskIoState()
 _slow_last = 0.0
 SLOW_INTERVAL_SEC = 30.0
 
@@ -51,6 +54,7 @@ def metrics(
     sample = collect_snapshot(
         cpu_sample_interval=0.15,
         net_state=_net_state,
+        disk_io_state=_disk_io_state,
         include_slow=include_slow,
         include_processes=processes,
         process_sample_limit=proc_limit,
@@ -73,6 +77,15 @@ def zpool_detail(pool_name: str) -> dict:
     data = collect_zpool_detail(pool_name)
     if data is None:
         raise HTTPException(status_code=404, detail="Pool not found or not available")
+    return data
+
+
+@app.get("/api/thermal/detail")
+def thermal_detail(key: str = Query(..., min_length=4, max_length=260)) -> dict:
+    """Sysfs-backed fields for one thermal zone (``zone:thermal_zoneN``) or hwmon channel."""
+    data = collect_thermal_detail(key)
+    if data is None:
+        raise HTTPException(status_code=404, detail="Sensor not found")
     return data
 
 
@@ -121,6 +134,7 @@ async def stream(
         collect_snapshot(
             cpu_sample_interval=0.15,
             net_state=_net_state,
+            disk_io_state=_disk_io_state,
             include_slow=False,
             include_processes=processes,
             process_sample_limit=proc_limit,
@@ -133,6 +147,7 @@ async def stream(
             snap = collect_snapshot(
                 cpu_sample_interval=None,
                 net_state=_net_state,
+                disk_io_state=_disk_io_state,
                 include_slow=include_slow,
                 include_processes=processes,
                 process_sample_limit=proc_limit,

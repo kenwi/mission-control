@@ -301,11 +301,13 @@ function initSettingsDrawer() {
   });
 }
 
-const PANEL_IDS = ["compute", "operations", "storage", "network", "processes"];
+const PANEL_IDS = ["compute", "thermal", "operations", "storage", "disk_io", "network", "processes"];
 const PANEL_LABELS = {
   compute: "Compute",
+  thermal: "Thermal",
   operations: "Operations",
   storage: "Storage",
+  disk_io: "Disk I/O",
   network: "Network",
   processes: "Top processes",
 };
@@ -709,6 +711,8 @@ function refreshAllSettingsFromStorage() {
   loadProcSortKeyDir();
   loadDiskSortKeyDir();
   loadNetSortKeyDir();
+  loadDiskIoSortKeyDir();
+  loadThermalSortKeyDir();
   netRateUnit = loadNetRateUnit();
   const netRateSel = document.getElementById("net-rate-unit-select");
   if (netRateSel) netRateSel.value = netRateUnit;
@@ -744,6 +748,8 @@ function refreshAllSettingsFromStorage() {
   renderDisks(lastDisks);
   renderZfsPools(lastZfsPools);
   renderNet(lastNetwork);
+  renderDiskIo(lastDiskIo);
+  renderThermal(lastThermal);
   renderAptPackagesTable();
   syncAptPackagesVisibility();
 }
@@ -1005,6 +1011,11 @@ function formatNetRate(bps) {
   return formatNetRateAsBytes(v);
 }
 
+function formatBytesPerSec(bps) {
+  if (bps == null || !Number.isFinite(Number(bps))) return "—";
+  return formatNetRateAsBytes(Number(bps));
+}
+
 function formatUptime(sec) {
   const s = Math.floor(sec % 60);
   const m = Math.floor((sec / 60) % 60);
@@ -1139,6 +1150,8 @@ function cmpDiskRows(a, b) {
 let lastDisks = [];
 let lastZfsPools = [];
 let lastNetwork = null;
+let lastDiskIo = null;
+let lastThermal = null;
 
 function initDiskSortHeaderClicks() {
   const host = document.getElementById("panel-body-storage");
@@ -1727,6 +1740,11 @@ function initModalEscapeToClose() {
   initModalEscapeToClose.done = true;
   document.addEventListener("keydown", (e) => {
     if (e.key !== "Escape") return;
+    const thermalDlg = document.getElementById("thermal-detail-dialog");
+    if (thermalDlg && !thermalDlg.hidden) {
+      closeThermalDetailModal();
+      return;
+    }
     const netDlg = document.getElementById("net-detail-dialog");
     if (netDlg && !netDlg.hidden) {
       closeNetDetailModal();
@@ -2103,6 +2121,471 @@ function renderNet(net) {
       <th class="net-th net-sortable net-th-metric" scope="col" data-sort-key="rx" role="columnheader" tabindex="0" aria-sort="${netSortAriaSort("rx")}" title="Bytes received (cumulative since boot)">RX${netSortArrowHtml("rx")}</th>
       <th class="net-th net-sortable net-th-metric" scope="col" data-sort-key="tx" role="columnheader" tabindex="0" aria-sort="${netSortAriaSort("tx")}" title="Bytes sent (cumulative since boot)">TX${netSortArrowHtml("tx")}</th>
     </tr></thead><tbody>${rows}</tbody></table>`;
+}
+
+const DISK_IO_SORT_KEYDIR_KEY = "mc-disk-io-sort-keydir";
+
+/** @type {"device"|"read"|"write"|"rx"|"tx"} */
+let diskIoSortColumn = "device";
+/** @type {"asc"|"desc"} */
+let diskIoSortDir = "asc";
+
+function normalizeDiskIoSortColumn(k) {
+  if (k === "read" || k === "write" || k === "device" || k === "rx" || k === "tx") return k;
+  return "device";
+}
+
+function loadDiskIoSortKeyDir() {
+  try {
+    const raw = localStorage.getItem(DISK_IO_SORT_KEYDIR_KEY);
+    if (raw) {
+      const o = JSON.parse(raw);
+      if (o && typeof o === "object") {
+        diskIoSortColumn = normalizeDiskIoSortColumn(o.column || o.key);
+        diskIoSortDir = o.dir === "desc" ? "desc" : "asc";
+      }
+    }
+  } catch (_) {
+    /* ignore */
+  }
+}
+
+function saveDiskIoSortKeyDir() {
+  try {
+    localStorage.setItem(
+      DISK_IO_SORT_KEYDIR_KEY,
+      JSON.stringify({ column: diskIoSortColumn, dir: diskIoSortDir })
+    );
+  } catch (_) {
+    /* ignore */
+  }
+}
+
+function defaultDirForDiskIoColumn(col) {
+  if (col === "device") return "asc";
+  return "desc";
+}
+
+function onDiskIoColumnHeaderClick(key) {
+  const c = normalizeDiskIoSortColumn(key);
+  if (diskIoSortColumn === c) {
+    diskIoSortDir = diskIoSortDir === "asc" ? "desc" : "asc";
+  } else {
+    diskIoSortColumn = c;
+    diskIoSortDir = defaultDirForDiskIoColumn(c);
+  }
+  saveDiskIoSortKeyDir();
+  renderDiskIo(lastDiskIo);
+}
+
+function diskIoSortAriaSort(col) {
+  if (diskIoSortColumn !== col) return "none";
+  return diskIoSortDir === "asc" ? "ascending" : "descending";
+}
+
+function diskIoSortArrowHtml(col) {
+  if (diskIoSortColumn !== col) return "";
+  const ch = diskIoSortDir === "asc" ? "\u2191" : "\u2193";
+  return ` <span class="proc-sort-ind" aria-hidden="true">${ch}</span>`;
+}
+
+function cmpDiskIoRows(a, b) {
+  const dir = diskIoSortDir === "asc" ? 1 : -1;
+  let cmp = 0;
+  switch (diskIoSortColumn) {
+    case "device":
+      cmp = String(a.name || "").localeCompare(String(b.name || ""), undefined, {
+        sensitivity: "base",
+        numeric: true,
+      });
+      break;
+    case "read":
+      cmp = (a.read_bps || 0) - (b.read_bps || 0);
+      break;
+    case "write":
+      cmp = (a.write_bps || 0) - (b.write_bps || 0);
+      break;
+    case "rx":
+      cmp = (Number(a.read_bytes) || 0) - (Number(b.read_bytes) || 0);
+      break;
+    case "tx":
+      cmp = (Number(a.write_bytes) || 0) - (Number(b.write_bytes) || 0);
+      break;
+    default:
+      cmp = 0;
+  }
+  if (cmp !== 0) return dir * cmp;
+  return String(a.name || "").localeCompare(String(b.name || ""), undefined, { sensitivity: "base", numeric: true });
+}
+
+function initDiskIoSortHeaderClicks() {
+  const host = document.getElementById("panel-body-disk-io");
+  if (!host || host.dataset.diskIoSortBound === "1") return;
+  host.dataset.diskIoSortBound = "1";
+  host.addEventListener("click", (e) => {
+    const th = e.target.closest("th.disk-io-sortable[data-sort-key]");
+    if (!th || !host.contains(th)) return;
+    onDiskIoColumnHeaderClick(th.getAttribute("data-sort-key") || "");
+  });
+  host.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter" && e.key !== " ") return;
+    const th = e.target.closest("th.disk-io-sortable[data-sort-key]");
+    if (!th || !host.contains(th)) return;
+    e.preventDefault();
+    onDiskIoColumnHeaderClick(th.getAttribute("data-sort-key") || "");
+  });
+}
+
+function renderDiskIo(dio) {
+  const wrap = document.getElementById("disk-io-table");
+  if (!wrap) return;
+  if (!dio || !dio.devices || !Object.keys(dio.devices).length) {
+    wrap.innerHTML = "<p class=\"tile-meta\">No block devices in /proc/diskstats</p>";
+    return;
+  }
+  const rates = dio.rates || {};
+  const list = Object.keys(dio.devices).map((name) => {
+    const d = dio.devices[name] || {};
+    return {
+      name,
+      read_bytes: Number(d.read_bytes),
+      write_bytes: Number(d.write_bytes),
+      read_bps: Number(rates[name] && rates[name].read_bps) || 0,
+      write_bps: Number(rates[name] && rates[name].write_bps) || 0,
+    };
+  });
+  list.sort(cmpDiskIoRows);
+  const rows = list
+    .map((row) => {
+      const rxd = Number.isFinite(row.read_bytes) ? formatBytes(row.read_bytes) : "—";
+      const txd = Number.isFinite(row.write_bytes) ? formatBytes(row.write_bytes) : "—";
+      return `<tr><td class="disk-io-td-name">${escapeHtml(row.name)}</td><td class="disk-io-td-metric">${escapeHtml(
+        formatBytesPerSec(row.read_bps)
+      )}</td><td class="disk-io-td-metric">${escapeHtml(
+        formatBytesPerSec(row.write_bps)
+      )}</td><td class="disk-io-td-metric disk-io-td-bytes" title="Sectors read (cumulative)">${escapeHtml(
+        rxd
+      )}</td><td class="disk-io-td-metric disk-io-td-bytes" title="Sectors written (cumulative)">${escapeHtml(
+        txd
+      )}</td></tr>`;
+    })
+    .join("");
+  wrap.innerHTML = `<table class="mc-table mc-table-disk-io" aria-label="Block device I/O from diskstats"><thead><tr>
+      <th class="disk-io-th disk-io-sortable" scope="col" data-sort-key="device" role="columnheader" tabindex="0" aria-sort="${diskIoSortAriaSort("device")}">Device${diskIoSortArrowHtml("device")}</th>
+      <th class="disk-io-th disk-io-sortable disk-io-th-metric" scope="col" data-sort-key="read" role="columnheader" tabindex="0" aria-sort="${diskIoSortAriaSort("read")}">Read/s${diskIoSortArrowHtml("read")}</th>
+      <th class="disk-io-th disk-io-sortable disk-io-th-metric" scope="col" data-sort-key="write" role="columnheader" tabindex="0" aria-sort="${diskIoSortAriaSort("write")}">Write/s${diskIoSortArrowHtml("write")}</th>
+      <th class="disk-io-th disk-io-sortable disk-io-th-metric" scope="col" data-sort-key="rx" role="columnheader" tabindex="0" aria-sort="${diskIoSortAriaSort("rx")}" title="Cumulative bytes read">Read${diskIoSortArrowHtml("rx")}</th>
+      <th class="disk-io-th disk-io-sortable disk-io-th-metric" scope="col" data-sort-key="tx" role="columnheader" tabindex="0" aria-sort="${diskIoSortAriaSort("tx")}" title="Cumulative bytes written">Write${diskIoSortArrowHtml("tx")}</th>
+    </tr></thead><tbody>${rows}</tbody></table>`;
+}
+
+const THERMAL_SORT_KEYDIR_KEY = "mc-thermal-sort-keydir";
+
+/** @type {"name"|"temp"} */
+let thermalSortColumn = "name";
+/** @type {"asc"|"desc"} */
+let thermalSortDir = "asc";
+
+function normalizeThermalSortColumn(k) {
+  if (k === "name" || k === "temp") return k;
+  return "name";
+}
+
+function loadThermalSortKeyDir() {
+  try {
+    const raw = localStorage.getItem(THERMAL_SORT_KEYDIR_KEY);
+    if (raw) {
+      const o = JSON.parse(raw);
+      if (o && typeof o === "object") {
+        thermalSortColumn = normalizeThermalSortColumn(o.column || o.key);
+        thermalSortDir = o.dir === "desc" ? "desc" : "asc";
+      }
+    }
+  } catch (_) {
+    /* ignore */
+  }
+}
+
+function saveThermalSortKeyDir() {
+  try {
+    localStorage.setItem(
+      THERMAL_SORT_KEYDIR_KEY,
+      JSON.stringify({ column: thermalSortColumn, dir: thermalSortDir })
+    );
+  } catch (_) {
+    /* ignore */
+  }
+}
+
+function defaultDirForThermalColumn(col) {
+  if (col === "name") return "asc";
+  return "desc";
+}
+
+function onThermalColumnHeaderClick(key) {
+  const c = normalizeThermalSortColumn(key);
+  if (thermalSortColumn === c) {
+    thermalSortDir = thermalSortDir === "asc" ? "desc" : "asc";
+  } else {
+    thermalSortColumn = c;
+    thermalSortDir = defaultDirForThermalColumn(c);
+  }
+  saveThermalSortKeyDir();
+  renderThermal(lastThermal);
+}
+
+function thermalSortAriaSort(col) {
+  if (thermalSortColumn !== col) return "none";
+  return thermalSortDir === "asc" ? "ascending" : "descending";
+}
+
+function thermalSortArrowHtml(col) {
+  if (thermalSortColumn !== col) return "";
+  const ch = thermalSortDir === "asc" ? "\u2191" : "\u2193";
+  return ` <span class="proc-sort-ind" aria-hidden="true">${ch}</span>`;
+}
+
+function cmpThermalRows(a, b) {
+  const dir = thermalSortDir === "asc" ? 1 : -1;
+  let cmp = 0;
+  switch (thermalSortColumn) {
+    case "name":
+      cmp = String(a.name || "").localeCompare(String(b.name || ""), undefined, {
+        sensitivity: "base",
+      });
+      break;
+    case "temp": {
+      const ac = Number(a.cur);
+      const bc = Number(b.cur);
+      const af = Number.isFinite(ac) ? ac : NaN;
+      const bf = Number.isFinite(bc) ? bc : NaN;
+      if (!Number.isFinite(af) && !Number.isFinite(bf)) cmp = 0;
+      else if (!Number.isFinite(af)) cmp = 1;
+      else if (!Number.isFinite(bf)) cmp = -1;
+      else cmp = af - bf;
+      break;
+    }
+    default:
+      cmp = 0;
+  }
+  if (cmp !== 0) return dir * cmp;
+  return String(a.name || "").localeCompare(String(b.name || ""), undefined, { sensitivity: "base" });
+}
+
+function initThermalSortHeaderClicks() {
+  const host = document.getElementById("panel-body-thermal");
+  if (!host || host.dataset.thermalSortBound === "1") return;
+  host.dataset.thermalSortBound = "1";
+  host.addEventListener("click", (e) => {
+    const th = e.target.closest("th.thermal-sortable[data-sort-key]");
+    if (!th || !host.contains(th)) return;
+    onThermalColumnHeaderClick(th.getAttribute("data-sort-key") || "");
+  });
+  host.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter" && e.key !== " ") return;
+    const th = e.target.closest("th.thermal-sortable[data-sort-key]");
+    if (!th || !host.contains(th)) return;
+    e.preventDefault();
+    onThermalColumnHeaderClick(th.getAttribute("data-sort-key") || "");
+  });
+}
+
+function thermalTempClass(cur, high, crit) {
+  if (crit != null && Number.isFinite(cur) && cur >= crit) return "thermal-td-crit";
+  if (high != null && Number.isFinite(cur) && cur >= high) return "thermal-td-warn";
+  return "";
+}
+
+function renderThermal(data) {
+  const wrap = document.getElementById("thermal-table");
+  if (!wrap) return;
+  if (!data) {
+    wrap.innerHTML = "<p class=\"tile-meta\">No data.</p>";
+    return;
+  }
+  const chips = data.chips || {};
+  const zones = data.zones || [];
+  const rows = [];
+  for (const [chip, readings] of Object.entries(chips)) {
+    for (const r of readings) {
+      const name = `${chip}${r.label ? ` ${r.label}` : ""}`.trim();
+      const cur = r.current_c;
+      const hi = r.high_c != null ? r.high_c : null;
+      const cr = r.critical_c != null ? r.critical_c : null;
+      const cls = thermalTempClass(cur, hi, cr);
+      const limits =
+        hi != null || cr != null
+          ? [hi != null ? `high ${hi}°C` : null, cr != null ? `crit ${cr}°C` : null].filter(Boolean).join(" · ")
+          : "";
+      const dk = typeof r.detail_key === "string" ? r.detail_key : "";
+      rows.push({ name, cur, cls, limits, sub: "hwmon", detail_key: dk });
+    }
+  }
+  for (const z of zones) {
+    const dk = typeof z.detail_key === "string" ? z.detail_key : "";
+    rows.push({
+      name: z.name || "zone",
+      cur: z.current_c,
+      cls: "",
+      limits: "",
+      sub: "thermal zone",
+      detail_key: dk,
+    });
+  }
+  rows.sort(cmpThermalRows);
+  if (!rows.length) {
+    wrap.innerHTML =
+      "<p class=\"tile-meta\">No thermal sensors found (try sensors/lm-sensors; thermal zones may still appear).</p>";
+    return;
+  }
+  const tr = rows
+    .map((row) => {
+      const limDisp = row.limits || (row.sub === "thermal zone" ? "zone" : "—");
+      const tempCell =
+        row.cur != null && Number.isFinite(row.cur) ? escapeHtml(`${row.cur.toFixed(1)} °C`) : "—";
+      const hasKey = row.detail_key && row.detail_key.length > 0;
+      const rowClass = hasKey ? "thermal-row-detail" : "";
+      const roleAttr = hasKey ? ' role="button" tabindex="0"' : "";
+      const titleAttr = hasKey ? " title=\"Sensor details\"" : "";
+      const aria = hasKey
+        ? ` aria-label="Open details for ${escapeHtml(row.name)}"`
+        : "";
+      const dkAttr = hasKey ? ` data-detail-key="${escapeHtml(row.detail_key)}"` : "";
+      return `<tr class="${rowClass}"${roleAttr}${titleAttr}${aria}${dkAttr}><td class="thermal-td-name">${escapeHtml(row.name)}</td><td class="thermal-td-metric ${row.cls}" title="${escapeHtml(row.limits)}">${tempCell}</td><td class="thermal-td-meta">${escapeHtml(limDisp)}</td></tr>`;
+    })
+    .join("");
+  wrap.innerHTML = `<table class="mc-table mc-table-thermal" aria-label="Temperature sensors"><thead><tr>
+      <th class="thermal-th thermal-sortable" scope="col" data-sort-key="name" role="columnheader" tabindex="0" aria-sort="${thermalSortAriaSort("name")}">Sensor${thermalSortArrowHtml("name")}</th>
+      <th class="thermal-th thermal-th-metric thermal-sortable" scope="col" data-sort-key="temp" role="columnheader" tabindex="0" aria-sort="${thermalSortAriaSort("temp")}">Temp${thermalSortArrowHtml("temp")}</th>
+      <th class="thermal-th thermal-th-meta" scope="col">Limits</th>
+    </tr></thead><tbody>${tr}</tbody></table>`;
+}
+
+function initThermalRowClicks() {
+  const wrap = document.getElementById("thermal-table");
+  if (!wrap || wrap.dataset.thermalRowBound === "1") return;
+  wrap.dataset.thermalRowBound = "1";
+  wrap.addEventListener("click", (e) => {
+    const tr = e.target.closest("tbody tr.thermal-row-detail[data-detail-key]");
+    if (!tr || !wrap.contains(tr)) return;
+    const k = tr.getAttribute("data-detail-key") || "";
+    if (!k) return;
+    openThermalDetailModal(k, tr.querySelector(".thermal-td-name")?.textContent || "");
+  });
+  wrap.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter" && e.key !== " ") return;
+    const tr = e.target.closest("tbody tr.thermal-row-detail[data-detail-key]");
+    if (!tr || !wrap.contains(tr)) return;
+    e.preventDefault();
+    const k = tr.getAttribute("data-detail-key") || "";
+    if (!k) return;
+    openThermalDetailModal(k, tr.querySelector(".thermal-td-name")?.textContent || "");
+  });
+}
+
+function initThermalPanel() {
+  loadThermalSortKeyDir();
+  initThermalSortHeaderClicks();
+  initThermalRowClicks();
+}
+
+function initDiskIoPanel() {
+  loadDiskIoSortKeyDir();
+  initDiskIoSortHeaderClicks();
+}
+
+function closeThermalDetailModal() {
+  const backdrop = document.getElementById("thermal-detail-backdrop");
+  const dialog = document.getElementById("thermal-detail-dialog");
+  if (backdrop) {
+    backdrop.hidden = true;
+    backdrop.setAttribute("aria-hidden", "true");
+  }
+  if (dialog) {
+    dialog.hidden = true;
+    dialog.setAttribute("aria-hidden", "true");
+  }
+}
+
+function renderThermalDetailHtml(data) {
+  if (!data) return "<p class=\"tile-meta\">No data.</p>";
+  let html = "<dl class=\"proc-detail-dl\">";
+  const pri = ["kind", "path", "hwmon_chip_name", "detail_key", "ts"];
+  const shown = new Set();
+  for (const k of pri) {
+    if (!Object.prototype.hasOwnProperty.call(data, k)) continue;
+    const v = data[k];
+    if (v == null) continue;
+    shown.add(k);
+    const label =
+      k === "hwmon_chip_name"
+        ? "Hwmon chip"
+        : k === "detail_key"
+          ? "Key"
+          : k;
+    if (k === "ts" && typeof v === "number") {
+      html += `<dt>${escapeHtml(label)}</dt><dd>${escapeHtml(
+        `${v} (${new Date(v * 1000).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "medium" })})`
+      )}</dd>`;
+      continue;
+    }
+    html += `<dt>${escapeHtml(label)}</dt><dd>${escapeHtml(String(v))}</dd>`;
+  }
+  const fields = data.fields;
+  if (fields && typeof fields === "object") {
+    shown.add("fields");
+    const lines = Object.keys(fields)
+      .sort()
+      .map((fk) => `${fk}: ${fields[fk]}`);
+    html += `<dt>sysfs</dt><dd><pre class="proc-detail-json proc-detail-json-inline">${escapeHtml(
+      lines.join("\n")
+    )}</pre></dd>`;
+  }
+  html += "</dl>";
+  html +=
+    "<details class=\"proc-detail-raw\"><summary>All fields (JSON)</summary>" +
+    `<pre class="proc-detail-json">${escapeHtml(JSON.stringify(data, null, 2))}</pre></details>`;
+  return html;
+}
+
+function openThermalDetailModal(detailKey, displayName) {
+  const backdrop = document.getElementById("thermal-detail-backdrop");
+  const dialog = document.getElementById("thermal-detail-dialog");
+  const body = document.getElementById("thermal-detail-body");
+  const title = document.getElementById("thermal-detail-title");
+  if (!backdrop || !dialog || !body || !title) return;
+
+  title.textContent = displayName || detailKey;
+  body.innerHTML = "<p class=\"tile-meta\">Loading…</p>";
+  backdrop.hidden = false;
+  dialog.hidden = false;
+  backdrop.setAttribute("aria-hidden", "false");
+  dialog.setAttribute("aria-hidden", "false");
+
+  document.getElementById("thermal-detail-close")?.focus();
+
+  const q = encodeURIComponent(detailKey);
+  fetch(`/api/thermal/detail?key=${q}`)
+    .then((res) => {
+      if (res.status === 404) throw new Error("Sensor not found.");
+      if (!res.ok) throw new Error(`Request failed (${res.status}).`);
+      return res.json();
+    })
+    .then((d) => {
+      title.textContent = displayName || detailKey;
+      body.innerHTML = renderThermalDetailHtml(d);
+    })
+    .catch((err) => {
+      title.textContent = displayName || detailKey;
+      body.innerHTML = `<p class="tile-meta">${escapeHtml(err.message || String(err))}</p>`;
+    });
+}
+
+function initThermalDetailModal() {
+  const backdrop = document.getElementById("thermal-detail-backdrop");
+  const closeBtn = document.getElementById("thermal-detail-close");
+  closeBtn?.addEventListener("click", closeThermalDetailModal);
+  backdrop?.addEventListener("click", closeThermalDetailModal);
 }
 
 function escapeHtml(s) {
@@ -2506,6 +2989,8 @@ const MC_SETTINGS_KEYS = [
   PROC_CPU_SCALE_KEY,
   PROC_SORT_KEYDIR_KEY,
   DISK_SORT_KEYDIR_KEY,
+  DISK_IO_SORT_KEYDIR_KEY,
+  THERMAL_SORT_KEYDIR_KEY,
   NET_RATE_UNIT_KEY,
   NET_SORT_KEYDIR_KEY,
   MODAL_WIDTH_KEY,
@@ -3024,6 +3509,9 @@ function applySnapshot(data) {
   setText("uptime-value", formatUptime(data.uptime_sec || 0));
   setText("os-meta", pretty || "—");
 
+  lastThermal = data.thermal ?? null;
+  renderThermal(lastThermal);
+
   const failed = data.systemd_failed;
   const systemdEl = document.getElementById("systemd-row");
   if (systemdEl) {
@@ -3065,6 +3553,8 @@ function applySnapshot(data) {
   renderZfsPools(lastZfsPools);
   lastNetwork = data.network ?? null;
   renderNet(lastNetwork);
+  lastDiskIo = data.disk_io ?? null;
+  renderDiskIo(lastDiskIo);
 
   lastProcesses = Array.isArray(data.processes) ? data.processes : [];
   renderProcsTable();
@@ -3098,12 +3588,15 @@ initContentLayoutMaxControl();
 initContentPaddingControl();
 initProcMemUnitControl();
 initNetworkPanel();
+initDiskIoPanel();
+initThermalPanel();
 initSettingsDrawer();
 initSettingsBackup();
 initProcessDetailModal();
 initDiskDetailModal();
 initZpoolDetailModal();
 initNetDetailModal();
+initThermalDetailModal();
 initModalEscapeToClose();
 initPanelLayout();
 initPanelVisibilityControls();
