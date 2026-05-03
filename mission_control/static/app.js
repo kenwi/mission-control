@@ -268,7 +268,7 @@ function initHeaderPrefs() {
 }
 
 const UPDATE_INTERVAL_KEY = "mc-update-interval";
-const STREAM_INTERVAL_OPTIONS = [0.25, 0.5, 1, 2, 5, 10];
+const STREAM_INTERVAL_OPTIONS = [0.25, 0.5, 1, 2, 5, 10, 15, 20, 30];
 
 function snapStreamInterval(sec) {
   let best = 1;

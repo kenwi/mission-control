@@ -48,7 +48,7 @@ Click the **settings** control (gear) to open **Options**:
 - **Theme** and **clock** (12h / 24h).
 - **Process memory column**: Percent only, RSS in MB or GB, or both; MB/GB applies when bytes are shown.
 - **Visible panels**: Toggle sections; you can also **drag** section headers to reorder and use **−** / **+** to collapse.
-- **Update interval**: Seconds between SSE snapshots (**0.25–30**).
+- **Update interval**: Seconds between SSE snapshots; the UI uses fixed steps **0.25 s through 30 s** (same bounds as `/api/stream`). Values outside that range are clamped; values between steps snap to the nearest step.
 - **Pause live updates**: Stops the stream (status shows **paused**); unpause reconnects with the current interval.
 - **Settings backup**: **Export** all stored options as JSON or **import** a file (including a flat `mc-*` key map).
 
@@ -72,7 +72,7 @@ When upgrades exist, expand the APT summary to list packages with **installed an
 | `GET` | `/assets/…` | Static assets |
 | `GET` | `/api/health` | `{"status":"ok"}` |
 | `GET` | `/api/metrics` | Single JSON snapshot (same shape as SSE payloads) |
-| `GET` | `/api/stream?interval=1` | SSE stream; `interval` in seconds, **0.25–30** |
+| `GET` | `/api/stream?interval=1` | SSE stream; `interval` in seconds, **0.25 to 30** inclusive |
 
 ## Project layout
 
