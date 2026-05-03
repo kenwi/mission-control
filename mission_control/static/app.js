@@ -582,6 +582,7 @@ function refreshAllSettingsFromStorage() {
   connectMetricsStream();
   renderProcsTable();
   renderDisks(lastDisks);
+  renderZfsPools(lastZfsPools);
   renderAptPackagesTable();
   syncAptPackagesVisibility();
 }
@@ -929,6 +930,7 @@ function cmpDiskRows(a, b) {
 }
 
 let lastDisks = [];
+let lastZfsPools = [];
 
 function initDiskSortHeaderClicks() {
   const host = document.getElementById("panel-body-storage");
@@ -986,6 +988,7 @@ function initStoragePanel() {
   loadDiskSortKeyDir();
   initDiskSortHeaderClicks();
   initDiskRowClicks();
+  initZpoolRowClicks();
 }
 
 const DISK_DETAIL_PRIORITY = [
@@ -993,11 +996,14 @@ const DISK_DETAIL_PRIORITY = [
   "device",
   "fstype",
   "mount_options",
+  "zfs_pool",
+  "zfs_dataset",
   "total",
   "used",
   "free",
   "percent",
   "inode_percent",
+  "zfs_properties",
   "statvfs",
   "ts",
 ];
@@ -1024,6 +1030,16 @@ function formatDiskDetailScalar(key, val) {
       return String(val);
     }
   }
+  if (key === "zfs_properties" && val && typeof val === "object") {
+    try {
+      return Object.keys(val)
+        .sort()
+        .map((p) => `${p}: ${val[p]}`)
+        .join("\n");
+    } catch (_) {
+      return String(val);
+    }
+  }
   if (typeof val === "object") {
     try {
       return JSON.stringify(val);
@@ -1046,6 +1062,13 @@ function renderDiskDetailHtml(data) {
     if (k === "statvfs" && v && typeof v === "object") {
       shown.add(k);
       html += `<dt>${escapeHtml(k)}</dt><dd><pre class="proc-detail-json proc-detail-json-inline">${escapeHtml(
+        formatDiskDetailScalar(k, v)
+      )}</pre></dd>`;
+      continue;
+    }
+    if (k === "zfs_properties" && v && typeof v === "object") {
+      shown.add(k);
+      html += `<dt>ZFS properties</dt><dd><pre class="proc-detail-json proc-detail-json-inline">${escapeHtml(
         formatDiskDetailScalar(k, v)
       )}</pre></dd>`;
       continue;
@@ -1120,11 +1143,185 @@ function initDiskDetailModal() {
   backdrop?.addEventListener("click", closeDiskDetailModal);
 }
 
+const ZPOOL_DETAIL_PRIORITY = [
+  "pool",
+  "state",
+  "health",
+  "capacity_percent",
+  "allocated",
+  "free",
+  "size",
+  "fragmentation_percent",
+  "scan",
+  "errors",
+  "status_text",
+  "properties",
+  "ts",
+];
+
+function formatZpoolDetailScalar(key, val) {
+  if (val == null) return "—";
+  if (key === "size" || key === "allocated" || key === "free") {
+    if (typeof val === "number" && Number.isFinite(val)) return formatBytes(val);
+  }
+  if (key === "capacity_percent" || key === "fragmentation_percent") {
+    if (typeof val === "number" && Number.isFinite(val)) return `${val.toFixed(1)}%`;
+  }
+  if (key === "ts" && typeof val === "number") {
+    try {
+      return `${val} (${new Date(val * 1000).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "medium" })})`;
+    } catch (_) {
+      return String(val);
+    }
+  }
+  if (key === "status_text" && typeof val === "string") return val;
+  if (key === "properties" && val && typeof val === "object") {
+    try {
+      return Object.keys(val)
+        .sort()
+        .map((p) => `${p}: ${val[p]}`)
+        .join("\n");
+    } catch (_) {
+      return String(val);
+    }
+  }
+  if (typeof val === "object") {
+    try {
+      return JSON.stringify(val);
+    } catch (_) {
+      return String(val);
+    }
+  }
+  return String(val);
+}
+
+function renderZpoolDetailHtml(data) {
+  if (!data) return "<p class=\"tile-meta\">No data.</p>";
+  const shown = new Set();
+  let html = "<dl class=\"proc-detail-dl\">";
+  for (const k of ZPOOL_DETAIL_PRIORITY) {
+    if (!Object.prototype.hasOwnProperty.call(data, k)) continue;
+    const v = data[k];
+    if (v == null && k !== "capacity_percent" && k !== "health") continue;
+    if (k === "status_text" && v && typeof v === "string") {
+      shown.add(k);
+      html += `<dt>zpool status</dt><dd><pre class="proc-detail-json proc-detail-zpool-status">${escapeHtml(v)}</pre></dd>`;
+      continue;
+    }
+    if (k === "properties" && v && typeof v === "object") {
+      shown.add(k);
+      html += `<dt>Pool properties</dt><dd><pre class="proc-detail-json proc-detail-json-inline">${escapeHtml(
+        formatZpoolDetailScalar(k, v)
+      )}</pre></dd>`;
+      continue;
+    }
+    shown.add(k);
+    html += `<dt>${escapeHtml(k)}</dt><dd>${escapeHtml(formatZpoolDetailScalar(k, v))}</dd>`;
+  }
+  html += "</dl>";
+  html +=
+    "<details class=\"proc-detail-raw\"><summary>All fields (JSON)</summary>" +
+    `<pre class="proc-detail-json">${escapeHtml(JSON.stringify(data, null, 2))}</pre></details>`;
+  return html;
+}
+
+function closeZpoolDetailModal() {
+  const backdrop = document.getElementById("zpool-detail-backdrop");
+  const dialog = document.getElementById("zpool-detail-dialog");
+  if (backdrop) {
+    backdrop.hidden = true;
+    backdrop.setAttribute("aria-hidden", "true");
+  }
+  if (dialog) {
+    dialog.hidden = true;
+    dialog.setAttribute("aria-hidden", "true");
+  }
+}
+
+function openZpoolDetailModal(poolName) {
+  const backdrop = document.getElementById("zpool-detail-backdrop");
+  const dialog = document.getElementById("zpool-detail-dialog");
+  const body = document.getElementById("zpool-detail-body");
+  const title = document.getElementById("zpool-detail-title");
+  if (!backdrop || !dialog || !body || !title) return;
+
+  title.textContent = poolName;
+  body.innerHTML = "<p class=\"tile-meta\">Loading…</p>";
+  backdrop.hidden = false;
+  dialog.hidden = false;
+  backdrop.setAttribute("aria-hidden", "false");
+  dialog.setAttribute("aria-hidden", "false");
+
+  document.getElementById("zpool-detail-close")?.focus();
+
+  const seg = encodeURIComponent(poolName);
+  fetch(`/api/zpool/${seg}`)
+    .then((res) => {
+      if (res.status === 404) throw new Error("Pool not found.");
+      if (!res.ok) throw new Error(`Request failed (${res.status}).`);
+      return res.json();
+    })
+    .then((d) => {
+      title.textContent = d.pool || poolName;
+      body.innerHTML = renderZpoolDetailHtml(d);
+    })
+    .catch((err) => {
+      title.textContent = poolName;
+      body.innerHTML = `<p class="tile-meta">${escapeHtml(err.message || String(err))}</p>`;
+    });
+}
+
+function initZpoolDetailModal() {
+  const backdrop = document.getElementById("zpool-detail-backdrop");
+  const closeBtn = document.getElementById("zpool-detail-close");
+  closeBtn?.addEventListener("click", closeZpoolDetailModal);
+  backdrop?.addEventListener("click", closeZpoolDetailModal);
+}
+
+function initZpoolRowClicks() {
+  const wrap = document.getElementById("zfs-pools-table");
+  if (!wrap || wrap.dataset.zpoolRowBound === "1") return;
+  wrap.dataset.zpoolRowBound = "1";
+  wrap.addEventListener("click", (e) => {
+    const tr = e.target.closest("tbody tr.zfs-row-detail");
+    if (!tr || !wrap.contains(tr)) return;
+    const enc = tr.getAttribute("data-pool") || "";
+    let name = "";
+    try {
+      name = decodeURIComponent(enc);
+    } catch (_) {
+      return;
+    }
+    if (!name) return;
+    openZpoolDetailModal(name);
+  });
+  wrap.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter" && e.key !== " ") return;
+    const tr = e.target.closest("tbody tr.zfs-row-detail");
+    if (!tr || !wrap.contains(tr)) return;
+    e.preventDefault();
+    const enc = tr.getAttribute("data-pool") || "";
+    let name = "";
+    try {
+      name = decodeURIComponent(enc);
+    } catch (_) {
+      return;
+    }
+    if (!name) return;
+    openZpoolDetailModal(name);
+  });
+}
+
 function initModalEscapeToClose() {
   if (initModalEscapeToClose.done) return;
   initModalEscapeToClose.done = true;
   document.addEventListener("keydown", (e) => {
     if (e.key !== "Escape") return;
+    const zpoolDlg = document.getElementById("zpool-detail-dialog");
+    if (zpoolDlg && !zpoolDlg.hidden) {
+      closeZpoolDetailModal();
+      return;
+    }
     const diskDlg = document.getElementById("disk-detail-dialog");
     if (diskDlg && !diskDlg.hidden) {
       closeDiskDetailModal();
@@ -1135,6 +1332,103 @@ function initModalEscapeToClose() {
   });
 }
 initModalEscapeToClose.done = false;
+
+function zfsPoolHealthClass(health) {
+  const s = String(health || "").toUpperCase();
+  if (s === "ONLINE") return "";
+  if (s === "DEGRADED" || s === "SUSPENDED") return "pct-warn";
+  if (
+    s === "FAULTED" ||
+    s === "OFFLINE" ||
+    s === "UNAVAIL" ||
+    s === "REMOVED" ||
+    s === "CLOSED"
+  ) {
+    return "pct-crit";
+  }
+  return s ? "pct-warn" : "";
+}
+
+function renderZfsPools(pools) {
+  const block = document.getElementById("zfs-pools-block");
+  const host = document.getElementById("zfs-pools-table");
+  if (!block || !host) return;
+  if (!Array.isArray(pools) || pools.length === 0) {
+    block.hidden = true;
+    host.innerHTML = "";
+    return;
+  }
+  block.hidden = false;
+  let sumAlloc = 0;
+  let sumFree = 0;
+  let sumSize = 0;
+  for (const p of pools) {
+    const a = Number(p.allocated);
+    const f = Number(p.free);
+    const s = Number(p.size);
+    if (Number.isFinite(a)) sumAlloc += a;
+    if (Number.isFinite(f)) sumFree += f;
+    if (Number.isFinite(s)) sumSize += s;
+  }
+  const aggCap = sumSize > 0 ? (100 * sumAlloc) / sumSize : NaN;
+  const aggCapDisp = Number.isFinite(aggCap) ? `${aggCap.toFixed(1)}%` : "—";
+  const aggCapClass = Number.isFinite(aggCap) ? diskClass(aggCap) : "";
+  const foot = `<tfoot><tr class="zfs-tfoot-row">
+      <td class="zfs-td-name zfs-tfoot-label" colspan="3">Total · ${pools.length} pools</td>
+      <td class="zfs-td-metric zfs-tfoot-metric ${aggCapClass}">${aggCapDisp}</td>
+      <td class="zfs-td-metric zfs-tfoot-metric">${escapeHtml(formatBytes(sumAlloc))}</td>
+      <td class="zfs-td-metric zfs-tfoot-metric">${escapeHtml(formatBytes(sumFree))}</td>
+      <td class="zfs-td-metric zfs-tfoot-metric">${escapeHtml(formatBytes(sumSize))}</td>
+      <td class="zfs-td-metric zfs-tfoot-metric">—</td>
+      <td class="zfs-td-scan zfs-tfoot-metric">—</td>
+      <td class="zfs-td-scan zfs-tfoot-metric">—</td>
+    </tr></tfoot>`;
+  const rows = pools
+    .map((p) => {
+      const cap =
+        p.capacity_percent != null && Number.isFinite(Number(p.capacity_percent))
+          ? `${Number(p.capacity_percent).toFixed(1)}%`
+          : "—";
+      const frag =
+        p.fragmentation_percent != null && Number.isFinite(Number(p.fragmentation_percent))
+          ? `${Number(p.fragmentation_percent).toFixed(1)}%`
+          : "—";
+      const scan = p.scan ? escapeHtml(p.scan) : "—";
+      const err = p.errors ? escapeHtml(p.errors) : "—";
+      const state = p.state ? escapeHtml(p.state) : "—";
+      const hcls = zfsPoolHealthClass(p.health);
+      const health = p.health ? escapeHtml(String(p.health)) : "—";
+      const scanTitle = p.scan ? escapeHtml(p.scan) : "";
+      const errTitle = p.errors ? escapeHtml(p.errors) : "";
+      const poolEnc = encodeURIComponent(p.name || "");
+      return `<tr class="zfs-row-detail" role="button" tabindex="0" data-pool="${poolEnc}" title="Pool details" aria-label="Open details for pool ${escapeHtml(p.name)}"><td class="zfs-td-name">${escapeHtml(
+        p.name || "—"
+      )}</td>
+      <td class="zfs-td-str">${state}</td>
+      <td class="zfs-td-health ${hcls}">${health}</td>
+      <td class="zfs-td-metric">${cap}</td>
+      <td class="zfs-td-metric">${escapeHtml(formatBytes(p.allocated))}</td>
+      <td class="zfs-td-metric">${escapeHtml(formatBytes(p.free))}</td>
+      <td class="zfs-td-metric">${escapeHtml(formatBytes(p.size))}</td>
+      <td class="zfs-td-metric">${frag}</td>
+      <td class="zfs-td-scan" title="${scanTitle}">${scan}</td>
+      <td class="zfs-td-scan" title="${errTitle}">${err}</td>
+    </tr>`;
+    })
+    .join("");
+  host.innerHTML = `<table class="mc-table mc-table-zfs" aria-label="ZFS pools"><thead><tr>
+    <th scope="col">Pool</th>
+    <th scope="col">State</th>
+    <th scope="col">Health</th>
+    <th scope="col" class="zfs-th-num">CAP</th>
+    <th scope="col" class="zfs-th-num">Alloc</th>
+    <th scope="col" class="zfs-th-num">Free</th>
+    <th scope="col" class="zfs-th-num">Size</th>
+    <th scope="col" class="zfs-th-num">Frag</th>
+    <th scope="col">Scan</th>
+    <th scope="col">Errors</th>
+  </tr></thead><tbody>${rows}</tbody>${foot}</table>`;
+}
 
 function renderDisks(disks) {
   lastDisks = Array.isArray(disks) ? disks : [];
@@ -2185,6 +2479,8 @@ function applySnapshot(data) {
   syncAptPackagesVisibility();
 
   renderDisks(data.disk);
+  lastZfsPools = Array.isArray(data.zfs_pools) ? data.zfs_pools : [];
+  renderZfsPools(lastZfsPools);
   renderNet(data.network);
 
   lastProcesses = Array.isArray(data.processes) ? data.processes : [];
@@ -2219,6 +2515,7 @@ initSettingsDrawer();
 initSettingsBackup();
 initProcessDetailModal();
 initDiskDetailModal();
+initZpoolDetailModal();
 initModalEscapeToClose();
 initPanelLayout();
 initPanelVisibilityControls();

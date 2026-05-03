@@ -192,6 +192,10 @@
       </div>
       <div class="panel-body" id="panel-body-storage">
         <div id="disk-table" class="table-wrap"></div>
+        <div id="zfs-pools-block" class="zfs-pools-block" hidden>
+          <h3 class="zfs-pools-heading">ZFS pools</h3>
+          <div id="zfs-pools-table" class="table-wrap"></div>
+        </div>
       </div>
     </section>
 
@@ -270,6 +274,23 @@
       <button type="button" id="disk-detail-close" class="mc-modal-close" aria-label="Close mount details">×</button>
     </div>
     <div id="disk-detail-body" class="mc-modal-body"></div>
+  </div>
+
+  <div id="zpool-detail-backdrop" class="mc-modal-backdrop" hidden aria-hidden="true"></div>
+  <div
+    id="zpool-detail-dialog"
+    class="mc-modal"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="zpool-detail-title"
+    hidden
+    aria-hidden="true"
+  >
+    <div class="mc-modal-head">
+      <h2 id="zpool-detail-title" class="mc-modal-title">ZFS pool</h2>
+      <button type="button" id="zpool-detail-close" class="mc-modal-close" aria-label="Close pool details">×</button>
+    </div>
+    <div id="zpool-detail-body" class="mc-modal-body"></div>
   </div>
 
   <script src="/assets/app.js" defer></script>

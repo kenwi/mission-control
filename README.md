@@ -74,13 +74,14 @@ When upgrades exist, expand the APT summary to list packages with **installed an
 | `GET` | `/api/health` | `{"status":"ok"}` |
 | `GET` | `/api/metrics` | Single JSON snapshot (`processes` and `proc_limit` query params; `proc_limit=0` = all processes in the sample) |
 | `GET` | `/api/stream` | SSE stream; `interval` (**0.25–30** s), `processes` (bool), `proc_limit` (default **200**; **0** = full process list each tick) |
-| `GET` | `/api/mount` | Live mount usage + ``statvfs``; query ``mountpoint`` (URL-encoded path) |
+| `GET` | `/api/zpool/{name}` | ZFS pool: capacity, health, cached state/scan/errors, full ``zpool status`` text, and ``zpool get all`` as ``properties`` |
+| `GET` | `/api/mount` | Mount usage + ``statvfs``; ZFS rows add ``zfs_pool``, ``zfs_dataset``, ``zfs_properties`` when ``zfs`` / ``findmnt`` can resolve the dataset |
 | `GET` | `/api/process/{pid}` | Process detail for a live PID (JSON); **404** if the process is gone |
 
 ## Project layout
 
 - `mission_control/main.py`: FastAPI app, routes, static mount
-- `mission_control/metrics.py`: Snapshot collection (`psutil`, optional `systemctl` / `apt`)
+- `mission_control/metrics.py`: Snapshot collection (`psutil`, optional `systemctl` / `apt` / `zpool` / `zfs` / `findmnt`)
 - `mission_control/static/`: Browser UI
 - `pyproject.toml`: Package metadata and dependencies
 - `run.sh`: Run from the project venv

@@ -16,6 +16,7 @@ from mission_control.metrics import (
     collect_mount_detail,
     collect_process_detail,
     collect_snapshot,
+    collect_zpool_detail,
 )
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
@@ -62,6 +63,15 @@ def mount_detail(mountpoint: str = Query(..., min_length=1)) -> dict:
     data = collect_mount_detail(mountpoint)
     if data is None:
         raise HTTPException(status_code=404, detail="Mount not available")
+    return data
+
+
+@app.get("/api/zpool/{pool_name}")
+def zpool_detail(pool_name: str) -> dict:
+    """ZFS pool status and ``zpool get`` output for one pool name."""
+    data = collect_zpool_detail(pool_name)
+    if data is None:
+        raise HTTPException(status_code=404, detail="Pool not found or not available")
     return data
 
 

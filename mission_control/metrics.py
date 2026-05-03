@@ -122,7 +122,312 @@ def collect_mount_detail(mountpoint: str) -> dict[str, Any] | None:
                 100.0 * (1.0 - sv.f_favail / max(sv.f_files, 1)), 1
             )
 
+    if part and getattr(part, "fstype", None) == "zfs":
+        ds = _zfs_resolve_dataset(part, mp)
+        if ds:
+            out["zfs_dataset"] = ds
+            out["zfs_pool"] = ds.split("/")[0]
+            zprop = _zfs_dataset_properties(ds)
+            if zprop:
+                out["zfs_properties"] = zprop
+
     return out
+
+
+_zfs_pool_status_cache: dict[str, Any] = {"ts": 0.0, "by_pool": {}}
+_ZFS_STATUS_CACHE_TTL_SEC = 25.0
+
+
+def _zfs_dataset_name_for_mount(mountpoint: str) -> str | None:
+    """Return ``pool/dataset`` style name for a ZFS mount (``findmnt``)."""
+    mp = os.path.normpath(mountpoint)
+    try:
+        r = subprocess.run(
+            ["findmnt", "-n", "-o", "SOURCE", "--", mp],
+            capture_output=True,
+            text=True,
+            timeout=4,
+        )
+        if r.returncode == 0:
+            src = r.stdout.strip()
+            if src and "/" in src and not src.startswith(("/", "[")):
+                return src
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        pass
+    return None
+
+
+_ZFS_DETAIL_PROPS = (
+    "used,available,referenced,compressratio,compression,recordsize,atime,"
+    "canmount,quota,refquota,reservation,refreservation,mounted,mountpoint,"
+    "encryption,keystatus"
+)
+
+
+def _zfs_dataset_properties(dataset: str) -> dict[str, str]:
+    props: dict[str, str] = {}
+    try:
+        r = subprocess.run(
+            [
+                "zfs",
+                "get",
+                "-H",
+                "-o",
+                "property,value",
+                _ZFS_DETAIL_PROPS,
+                dataset,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if r.returncode != 0:
+            return props
+        for line in r.stdout.splitlines():
+            line = line.strip()
+            if not line or "\t" not in line:
+                continue
+            k, _, v = line.partition("\t")
+            props[k.strip()] = v.strip()
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+        pass
+    return props
+
+
+def _zfs_zpool_status_by_pool() -> dict[str, dict[str, str]]:
+    now = time.time()
+    global _zfs_pool_status_cache
+    if now - float(_zfs_pool_status_cache["ts"]) < _ZFS_STATUS_CACHE_TTL_SEC:
+        cached = _zfs_pool_status_cache["by_pool"]
+        if isinstance(cached, dict):
+            return dict(cached)
+
+    by_pool: dict[str, dict[str, str]] = {}
+    try:
+        r = subprocess.run(
+            ["zpool", "status"],
+            capture_output=True,
+            text=True,
+            timeout=18,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        _zfs_pool_status_cache = {"ts": now, "by_pool": by_pool}
+        return by_pool
+
+    if r.returncode != 0:
+        _zfs_pool_status_cache = {"ts": now, "by_pool": by_pool}
+        return by_pool
+
+    current: str | None = None
+    for raw in r.stdout.splitlines():
+        line = raw.rstrip()
+        m = re.match(r"\s*pool:\s*(.+)\s*$", line)
+        if m:
+            current = m.group(1).strip()
+            by_pool.setdefault(current, {})
+            continue
+        if current is None:
+            continue
+        m = re.match(r"\s*state:\s*(.+)\s*$", line)
+        if m:
+            by_pool[current]["state"] = m.group(1).strip()
+            continue
+        m = re.match(r"\s*status:\s*(.+)\s*$", line)
+        if m and "state" not in by_pool[current]:
+            by_pool[current]["state"] = m.group(1).strip()
+            continue
+        m = re.match(r"\s*scan:\s*(.+)\s*$", line)
+        if m:
+            by_pool[current]["scan"] = m.group(1).strip()
+            continue
+        m = re.match(r"\s*errors:\s*(.+)\s*$", line)
+        if m:
+            by_pool[current]["errors"] = m.group(1).strip()
+            continue
+
+    _zfs_pool_status_cache = {"ts": now, "by_pool": by_pool}
+    return by_pool
+
+
+def _zfs_pool_summaries() -> list[dict[str, Any]]:
+    """One row per imported pool (``zpool list`` + cached ``zpool status`` fields)."""
+    rows: list[dict[str, Any]] = []
+    try:
+        r = subprocess.run(
+            [
+                "zpool",
+                "list",
+                "-H",
+                "-p",
+                "-o",
+                "name,size,allocated,free,capacity,health,fragmentation",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=8,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return rows
+
+    if r.returncode != 0 or not r.stdout.strip():
+        return rows
+
+    status_map = _zfs_zpool_status_by_pool()
+
+    def int_or_none(s: str) -> int | None:
+        s = s.strip()
+        if not s or s == "-":
+            return None
+        try:
+            return int(s)
+        except ValueError:
+            return None
+
+    def pct_or_none(s: str) -> float | None:
+        s = s.strip().rstrip("%")
+        if not s or s == "-":
+            return None
+        try:
+            return round(float(s), 1)
+        except ValueError:
+            return None
+
+    for line in r.stdout.strip().splitlines():
+        parts = line.split("\t")
+        if len(parts) < 7:
+            continue
+        name, size, alloc, free, cap, health, frag = parts[:7]
+        st = status_map.get(name, {})
+        rows.append(
+            {
+                "name": name,
+                "size": int_or_none(size),
+                "allocated": int_or_none(alloc),
+                "free": int_or_none(free),
+                "capacity_percent": pct_or_none(cap),
+                "health": health.strip() if health else None,
+                "fragmentation_percent": pct_or_none(frag),
+                "state": st.get("state"),
+                "scan": st.get("scan"),
+                "errors": st.get("errors"),
+            }
+        )
+
+    return rows
+
+
+_POOL_NAME_SAFE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_.\-+]{0,199}$")
+
+
+def collect_zpool_detail(pool_name: str) -> dict[str, Any] | None:
+    """Live ZFS pool summary, ``zpool status`` output, and pool properties."""
+    raw = (pool_name or "").strip()
+    if not raw or not _POOL_NAME_SAFE.match(raw):
+        return None
+
+    def int_or_none(s: str) -> int | None:
+        s = s.strip()
+        if not s or s == "-":
+            return None
+        try:
+            return int(s)
+        except ValueError:
+            return None
+
+    def pct_or_none(s: str) -> float | None:
+        s = s.strip().rstrip("%")
+        if not s or s == "-":
+            return None
+        try:
+            return round(float(s), 1)
+        except ValueError:
+            return None
+
+    try:
+        lr = subprocess.run(
+            [
+                "zpool",
+                "list",
+                "-H",
+                "-p",
+                "-o",
+                "name,size,allocated,free,capacity,health,fragmentation",
+                raw,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=8,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return None
+
+    if lr.returncode != 0 or not lr.stdout.strip():
+        return None
+
+    parts = lr.stdout.strip().split("\t")
+    if len(parts) < 7 or parts[0] != raw:
+        return None
+
+    size, alloc, free, cap, health, frag = parts[1:7]
+    st = _zfs_zpool_status_by_pool().get(raw, {})
+
+    status_text = ""
+    try:
+        sr = subprocess.run(
+            ["zpool", "status", raw],
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+        if sr.returncode == 0:
+            status_text = sr.stdout.strip()
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+        pass
+
+    props: dict[str, str] = {}
+    try:
+        pr = subprocess.run(
+            ["zpool", "get", "-H", "-o", "property,value", "all", raw],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        if pr.returncode == 0:
+            for line in pr.stdout.splitlines():
+                line = line.strip()
+                if not line or "\t" not in line:
+                    continue
+                k, _, v = line.partition("\t")
+                props[k.strip()] = v.strip()
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+        pass
+
+    return {
+        "pool": raw,
+        "ts": time.time(),
+        "size": int_or_none(size),
+        "allocated": int_or_none(alloc),
+        "free": int_or_none(free),
+        "capacity_percent": pct_or_none(cap),
+        "health": health.strip() if health else None,
+        "fragmentation_percent": pct_or_none(frag),
+        "state": st.get("state"),
+        "scan": st.get("scan"),
+        "errors": st.get("errors"),
+        "status_text": status_text or None,
+        "properties": props or None,
+    }
+
+
+def _zfs_resolve_dataset(part: Any | None, mountpoint: str) -> str | None:
+    ds = _zfs_dataset_name_for_mount(mountpoint)
+    if ds:
+        return ds
+    if part is not None and getattr(part, "fstype", None) == "zfs":
+        dev = getattr(part, "device", None)
+        if dev and isinstance(dev, str) and "/" in dev and not dev.startswith("/"):
+            return dev
+    return None
 
 
 def _net_io() -> dict[str, Any]:
@@ -512,6 +817,7 @@ def collect_snapshot(
             "percent": round(swap.percent, 1) if swap.total else 0.0,
         },
         "disk": _disk_mounts(),
+        "zfs_pools": _zfs_pool_summaries(),
         "network": net,
         "processes": _top_processes(process_sample_limit) if include_processes else [],
     }

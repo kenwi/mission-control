@@ -960,6 +960,91 @@ table.mc-table.mc-table-procs {
   border-top: 1px solid var(--border);
 }
 
+.zfs-pools-block {
+  margin-top: 1.15rem;
+}
+
+.zfs-pools-heading {
+  margin: 0 0 0.5rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.mc-table-zfs .zfs-th-num,
+.mc-table-zfs .zfs-td-metric {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.mc-table-zfs .zfs-td-name {
+  font-weight: 600;
+}
+
+.mc-table-zfs .zfs-td-str {
+  font-size: 0.88em;
+  color: var(--muted);
+}
+
+.mc-table-zfs .zfs-td-health {
+  text-align: left;
+  white-space: nowrap;
+}
+
+.mc-table-zfs .zfs-td-scan {
+  max-width: 12rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.84em;
+  color: var(--muted);
+}
+
+.mc-table-zfs tbody tr.zfs-row-detail {
+  cursor: pointer;
+}
+
+.mc-table-zfs tbody tr.zfs-row-detail:hover {
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+}
+
+.mc-table-zfs tbody tr.zfs-row-detail:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  outline-offset: -2px;
+}
+
+.mc-table-zfs tfoot .zfs-tfoot-row td {
+  border-bottom: none;
+}
+
+.mc-table-zfs .zfs-tfoot-label {
+  padding-top: 0.55rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.mc-table-zfs .zfs-tfoot-metric {
+  padding-top: 0.55rem;
+  border-top: 1px solid var(--border);
+}
+
+.mc-table-zfs .zfs-tfoot-row .zfs-tfoot-label {
+  border-top: 1px solid var(--border);
+}
+
+.proc-detail-zpool-status {
+  margin: 0;
+  font-size: 0.78rem;
+  max-height: min(50vh, 22rem);
+  overflow: auto;
+}
+
 .proc-detail-json-inline {
   margin: 0;
   font-size: 0.78rem;
