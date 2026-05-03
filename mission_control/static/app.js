@@ -314,6 +314,10 @@ const PANEL_VISIBILITY_KEY = "mc-panel-visibility";
 const PANEL_ORDER_KEY = "mc-panel-order";
 const PANEL_COLLAPSED_KEY = "mc-panel-collapsed";
 const STORAGE_DISK_IO_COLLAPSED_KEY = "mc-storage-disk-io-collapsed";
+const THERMAL_FANS_COLLAPSED_KEY = "mc-thermal-fans-collapsed";
+const NETWORK_INTERFACES_COLLAPSED_KEY = "mc-network-interfaces-collapsed";
+const STORAGE_MOUNTS_COLLAPSED_KEY = "mc-storage-mounts-collapsed";
+const STORAGE_ZFS_COLLAPSED_KEY = "mc-storage-zfs-collapsed";
 
 function loadPanelVisibility() {
   const d = {};
@@ -728,6 +732,39 @@ function refreshAllSettingsFromStorage() {
   loadDiskIoSortKeyDir();
   loadThermalSortKeyDir();
   applyStorageDiskIoCollapsed();
+  applyThermalSensorsCollapsed();
+  applySubsectionCollapsed(
+    THERMAL_FANS_COLLAPSED_KEY,
+    "thermal-fans-subsection",
+    "thermal-fans-collapse",
+    "thermal-fans-body",
+    "Expand Fans",
+    "Collapse Fans"
+  );
+  applySubsectionCollapsed(
+    NETWORK_INTERFACES_COLLAPSED_KEY,
+    "net-interfaces-subsection",
+    "net-interfaces-collapse",
+    "net-interfaces-body",
+    "Expand Interfaces",
+    "Collapse Interfaces"
+  );
+  applySubsectionCollapsed(
+    STORAGE_MOUNTS_COLLAPSED_KEY,
+    "storage-mounts-subsection",
+    "storage-mounts-collapse",
+    "storage-mounts-body",
+    "Expand Mounts",
+    "Collapse Mounts"
+  );
+  applySubsectionCollapsed(
+    STORAGE_ZFS_COLLAPSED_KEY,
+    "zfs-pools-block",
+    "storage-zfs-collapse",
+    "storage-zfs-body",
+    "Expand ZFS pools",
+    "Collapse ZFS pools"
+  );
   netRateUnit = loadNetRateUnit();
   const netRateSel = document.getElementById("net-rate-unit-select");
   if (netRateSel) netRateSel.value = netRateUnit;
@@ -765,6 +802,7 @@ function refreshAllSettingsFromStorage() {
   renderNet(lastNetwork);
   renderDiskIo(lastDiskIo);
   renderThermal(lastThermal);
+  renderFans(lastFans);
   renderAptPackagesTable();
   syncAptPackagesVisibility();
 }
@@ -1168,6 +1206,7 @@ let lastZfsPools = [];
 let lastNetwork = null;
 let lastDiskIo = null;
 let lastThermal = null;
+let lastFans = null;
 
 function initDiskSortHeaderClicks() {
   const host = document.getElementById("panel-body-storage");
@@ -1274,6 +1313,72 @@ function initStorageDiskIoSubsectionCollapse() {
   });
 }
 
+function loadSubsectionCollapsed(key) {
+  try {
+    return localStorage.getItem(key) === "1";
+  } catch (_) {
+    return false;
+  }
+}
+
+function saveSubsectionCollapsed(key, on) {
+  try {
+    localStorage.setItem(key, on ? "1" : "0");
+  } catch (_) {
+    /* ignore */
+  }
+}
+
+function applySubsectionCollapsed(key, subsectionId, btnId, bodyId, expandLabel, collapseLabel) {
+  const subsection = document.getElementById(subsectionId);
+  const btn = document.getElementById(btnId);
+  const body = document.getElementById(bodyId);
+  if (!subsection || !btn || !body) return;
+  subsection.classList.toggle("is-collapsed", loadSubsectionCollapsed(key));
+  const collapsed = subsection.classList.contains("is-collapsed");
+  btn.setAttribute("aria-expanded", String(!collapsed));
+  btn.textContent = collapsed ? "+" : "−";
+  btn.setAttribute("aria-label", collapsed ? expandLabel : collapseLabel);
+  btn.setAttribute("title", collapsed ? expandLabel : collapseLabel);
+  body.hidden = collapsed;
+  body.setAttribute("aria-hidden", String(collapsed));
+}
+
+function initSubsectionCollapse(key, subsectionId, btnId, bodyId, expandLabel, collapseLabel, bindAttr, onToggle) {
+  const subsection = document.getElementById(subsectionId);
+  const btn = document.getElementById(btnId);
+  const body = document.getElementById(bodyId);
+  if (!subsection || !btn || !body || btn.dataset[bindAttr] === "1") return;
+  btn.dataset[bindAttr] = "1";
+  btn.addEventListener("click", () => {
+    const collapsed = !subsection.classList.contains("is-collapsed");
+    subsection.classList.toggle("is-collapsed", collapsed);
+    saveSubsectionCollapsed(key, collapsed);
+    btn.setAttribute("aria-expanded", String(!collapsed));
+    btn.textContent = collapsed ? "+" : "−";
+    btn.setAttribute("aria-label", collapsed ? expandLabel : collapseLabel);
+    btn.setAttribute("title", collapsed ? expandLabel : collapseLabel);
+    body.hidden = collapsed;
+    body.setAttribute("aria-hidden", String(collapsed));
+    if (typeof onToggle === "function") onToggle();
+  });
+}
+
+/** Click subsection title row (not the ± control) toggles collapse — reuses each button's listener. */
+function initSubpanelHeadingClickToggle() {
+  const main = document.querySelector("main.mc-grid");
+  if (!main || main.dataset.subpanelHeadToggleBound === "1") return;
+  main.dataset.subpanelHeadToggleBound = "1";
+  main.addEventListener("click", (e) => {
+    const head = e.target.closest(".storage-subsection-head");
+    if (!head || !main.contains(head)) return;
+    const btn = head.querySelector(".storage-subsection-collapse");
+    if (!btn) return;
+    if (btn.contains(e.target)) return;
+    btn.click();
+  });
+}
+
 function initStoragePanel() {
   loadDiskSortKeyDir();
   loadDiskIoSortKeyDir();
@@ -1282,7 +1387,43 @@ function initStoragePanel() {
   initDiskRowClicks();
   initDiskIoRowClicks();
   initZpoolRowClicks();
+  applySubsectionCollapsed(
+    STORAGE_MOUNTS_COLLAPSED_KEY,
+    "storage-mounts-subsection",
+    "storage-mounts-collapse",
+    "storage-mounts-body",
+    "Expand Mounts",
+    "Collapse Mounts"
+  );
+  applySubsectionCollapsed(
+    STORAGE_ZFS_COLLAPSED_KEY,
+    "zfs-pools-block",
+    "storage-zfs-collapse",
+    "storage-zfs-body",
+    "Expand ZFS pools",
+    "Collapse ZFS pools"
+  );
   applyStorageDiskIoCollapsed();
+  initSubsectionCollapse(
+    STORAGE_MOUNTS_COLLAPSED_KEY,
+    "storage-mounts-subsection",
+    "storage-mounts-collapse",
+    "storage-mounts-body",
+    "Expand Mounts",
+    "Collapse Mounts",
+    "mountsSubCollapseBound",
+    undefined
+  );
+  initSubsectionCollapse(
+    STORAGE_ZFS_COLLAPSED_KEY,
+    "zfs-pools-block",
+    "storage-zfs-collapse",
+    "storage-zfs-body",
+    "Expand ZFS pools",
+    "Collapse ZFS pools",
+    "zfsSubCollapseBound",
+    undefined
+  );
   initStorageDiskIoSubsectionCollapse();
 }
 
@@ -2113,6 +2254,14 @@ function renderZfsPools(pools) {
     <th scope="col">Scan</th>
     <th scope="col">Errors</th>
   </tr></thead><tbody>${rows}</tbody>${foot}</table>`;
+  applySubsectionCollapsed(
+    STORAGE_ZFS_COLLAPSED_KEY,
+    "zfs-pools-block",
+    "storage-zfs-collapse",
+    "storage-zfs-body",
+    "Expand ZFS pools",
+    "Collapse ZFS pools"
+  );
 }
 
 function renderDisks(disks) {
@@ -2331,6 +2480,24 @@ function initNetworkPanel() {
   initNetSortHeaderClicks();
   initNetRateUnitControl();
   initNetInterfaceRowClicks();
+  applySubsectionCollapsed(
+    NETWORK_INTERFACES_COLLAPSED_KEY,
+    "net-interfaces-subsection",
+    "net-interfaces-collapse",
+    "net-interfaces-body",
+    "Expand Interfaces",
+    "Collapse Interfaces"
+  );
+  initSubsectionCollapse(
+    NETWORK_INTERFACES_COLLAPSED_KEY,
+    "net-interfaces-subsection",
+    "net-interfaces-collapse",
+    "net-interfaces-body",
+    "Expand Interfaces",
+    "Collapse Interfaces",
+    "netIfSubCollapseBound",
+    undefined
+  );
 }
 
 function renderNet(net) {
@@ -2569,6 +2736,7 @@ function renderDiskIo(dio) {
 }
 
 const THERMAL_SORT_KEYDIR_KEY = "mc-thermal-sort-keydir";
+const THERMAL_SENSORS_COLLAPSED_KEY = "mc-thermal-sensors-collapsed";
 
 /** @type {"name"|"temp"} */
 let thermalSortColumn = "name";
@@ -2604,6 +2772,58 @@ function saveThermalSortKeyDir() {
   } catch (_) {
     /* ignore */
   }
+}
+
+function loadThermalSensorsCollapsed() {
+  try {
+    return localStorage.getItem(THERMAL_SENSORS_COLLAPSED_KEY) === "1";
+  } catch (_) {
+    return false;
+  }
+}
+
+function saveThermalSensorsCollapsed(on) {
+  try {
+    localStorage.setItem(THERMAL_SENSORS_COLLAPSED_KEY, on ? "1" : "0");
+  } catch (_) {
+    /* ignore */
+  }
+}
+
+function syncThermalSensorsCollapseUi(subsection, btn) {
+  const body = document.getElementById("thermal-sensors-body");
+  const collapsed = subsection.classList.contains("is-collapsed");
+  if (btn) {
+    btn.setAttribute("aria-expanded", String(!collapsed));
+    btn.textContent = collapsed ? "+" : "−";
+    btn.setAttribute("aria-label", collapsed ? "Expand Sensors" : "Collapse Sensors");
+    btn.setAttribute("title", collapsed ? "Expand Sensors" : "Collapse Sensors");
+  }
+  if (body) {
+    body.hidden = collapsed;
+    body.setAttribute("aria-hidden", String(collapsed));
+  }
+}
+
+function applyThermalSensorsCollapsed() {
+  const subsection = document.getElementById("thermal-sensors-subsection");
+  const btn = document.getElementById("thermal-sensors-collapse");
+  if (!subsection || !btn) return;
+  subsection.classList.toggle("is-collapsed", loadThermalSensorsCollapsed());
+  syncThermalSensorsCollapseUi(subsection, btn);
+}
+
+function initThermalSensorsSubsectionCollapse() {
+  const subsection = document.getElementById("thermal-sensors-subsection");
+  const btn = document.getElementById("thermal-sensors-collapse");
+  if (!subsection || !btn || btn.dataset.thermalSensorsSubBound === "1") return;
+  btn.dataset.thermalSensorsSubBound = "1";
+  btn.addEventListener("click", () => {
+    const collapsed = !subsection.classList.contains("is-collapsed");
+    subsection.classList.toggle("is-collapsed", collapsed);
+    saveThermalSensorsCollapsed(collapsed);
+    syncThermalSensorsCollapseUi(subsection, btn);
+  });
 }
 
 function defaultDirForThermalColumn(col) {
@@ -2750,6 +2970,43 @@ function renderThermal(data) {
     </tr></thead><tbody>${tr}</tbody></table>`;
 }
 
+function renderFans(data) {
+  const wrap = document.getElementById("thermal-fans-table");
+  if (!wrap) return;
+  if (!data || !data.chips || !Object.keys(data.chips).length) {
+    wrap.innerHTML = "<p class=\"tile-meta\">No fan sensors found (hwmon / lm-sensors).</p>";
+    return;
+  }
+  const rows = [];
+  for (const [chip, readings] of Object.entries(data.chips)) {
+    let idx = 0;
+    for (const r of readings) {
+      idx += 1;
+      const lbl = typeof r.label === "string" ? r.label.trim() : "";
+      const name = lbl ? `${chip} ${lbl}` : `${chip} fan ${idx}`;
+      const rpm = r.rpm != null ? Number(r.rpm) : NaN;
+      rows.push({ name, rpm: Number.isFinite(rpm) ? rpm : null });
+    }
+  }
+  rows.sort((a, b) =>
+    String(a.name || "").localeCompare(String(b.name || ""), undefined, {
+      sensitivity: "base",
+      numeric: true,
+    })
+  );
+  const tr = rows
+    .map((row) => {
+      const rpmCell =
+        row.rpm != null && Number.isFinite(row.rpm) ? escapeHtml(String(row.rpm)) : "—";
+      return `<tr><td class="fan-td-name">${escapeHtml(row.name)}</td><td class="fan-td-rpm">${rpmCell}</td></tr>`;
+    })
+    .join("");
+  wrap.innerHTML = `<table class="mc-table mc-table-fans" aria-label="Fan speeds"><thead><tr>
+      <th scope="col">Fan</th>
+      <th scope="col" class="fan-th-rpm">RPM</th>
+    </tr></thead><tbody>${tr}</tbody></table>`;
+}
+
 function initThermalRowClicks() {
   const wrap = document.getElementById("thermal-table");
   if (!wrap || wrap.dataset.thermalRowBound === "1") return;
@@ -2776,6 +3033,26 @@ function initThermalPanel() {
   loadThermalSortKeyDir();
   initThermalSortHeaderClicks();
   initThermalRowClicks();
+  applyThermalSensorsCollapsed();
+  initThermalSensorsSubsectionCollapse();
+  applySubsectionCollapsed(
+    THERMAL_FANS_COLLAPSED_KEY,
+    "thermal-fans-subsection",
+    "thermal-fans-collapse",
+    "thermal-fans-body",
+    "Expand Fans",
+    "Collapse Fans"
+  );
+  initSubsectionCollapse(
+    THERMAL_FANS_COLLAPSED_KEY,
+    "thermal-fans-subsection",
+    "thermal-fans-collapse",
+    "thermal-fans-body",
+    "Expand Fans",
+    "Collapse Fans",
+    "thermalFansSubCollapseBound",
+    undefined
+  );
 }
 
 function closeThermalDetailModal() {
@@ -3276,6 +3553,11 @@ const MC_SETTINGS_KEYS = [
   DISK_SORT_KEYDIR_KEY,
   DISK_IO_SORT_KEYDIR_KEY,
   THERMAL_SORT_KEYDIR_KEY,
+  THERMAL_SENSORS_COLLAPSED_KEY,
+  THERMAL_FANS_COLLAPSED_KEY,
+  NETWORK_INTERFACES_COLLAPSED_KEY,
+  STORAGE_MOUNTS_COLLAPSED_KEY,
+  STORAGE_ZFS_COLLAPSED_KEY,
   NET_RATE_UNIT_KEY,
   NET_SORT_KEYDIR_KEY,
   MODAL_WIDTH_KEY,
@@ -3796,6 +4078,8 @@ function applySnapshot(data) {
 
   lastThermal = data.thermal ?? null;
   renderThermal(lastThermal);
+  lastFans = data.fans ?? null;
+  renderFans(lastFans);
 
   const failed = data.systemd_failed;
   const systemdEl = document.getElementById("systemd-row");
@@ -3887,6 +4171,7 @@ initPanelLayout();
 initPanelVisibilityControls();
 initAptPackagesToggle();
 initStoragePanel();
+initSubpanelHeadingClickToggle();
 initProcessControls();
 initUpdateIntervalControl();
 

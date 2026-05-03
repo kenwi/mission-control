@@ -1110,6 +1110,18 @@ table.mc-table.mc-table-procs {
   text-align: left;
 }
 
+.mc-table-fans .fan-td-name {
+  font-family: var(--font-mono);
+  font-size: 0.88em;
+}
+
+.mc-table-fans .fan-th-rpm,
+.mc-table-fans .fan-td-rpm {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
 .storage-subsection {
   margin-top: 1.15rem;
 }
@@ -1161,6 +1173,8 @@ table.mc-table.mc-table-procs {
   align-items: center;
   gap: 0.4rem;
   margin: 0 0 0.5rem;
+  cursor: pointer;
+  user-select: none;
 }
 
 .storage-subsection-head .storage-subheading {

@@ -1460,6 +1460,77 @@ def _thermal_sensors() -> dict[str, Any]:
     return out
 
 
+_RE_FAN_INPUT = re.compile(r"^(fan\d+)_input$", re.I)
+
+
+def _fan_sensors() -> dict[str, Any]:
+    """Fan speeds from psutil and, if needed, ``/sys/class/hwmon`` ``fan*_input`` (RPM)."""
+    ts = time.time()
+    out: dict[str, Any] = {"ts": ts, "chips": {}}
+    try:
+        fans = psutil.sensors_fans()  # type: ignore[attr-defined]
+    except (AttributeError, NotImplementedError, OSError, RuntimeError):
+        fans = None
+    if fans:
+        for chip, entries in fans.items():
+            readings: list[dict[str, Any]] = []
+            for e in entries or []:
+                try:
+                    rpm = e.current
+                except AttributeError:
+                    continue
+                if rpm is None:
+                    continue
+                try:
+                    rpm_i = int(round(float(rpm)))
+                except (TypeError, ValueError):
+                    continue
+                readings.append(
+                    {
+                        "label": (getattr(e, "label", "") or "").strip(),
+                        "rpm": rpm_i,
+                    }
+                )
+            if readings:
+                out["chips"][str(chip)] = readings
+    if not out["chips"]:
+        root = Path("/sys/class/hwmon")
+        if root.is_dir():
+            for hw in sorted(root.glob("hwmon*")):
+                chip_name = hw.name
+                nf = hw / "name"
+                if nf.is_file():
+                    try:
+                        chip_name = nf.read_text(
+                            encoding="utf-8", errors="replace"
+                        ).strip() or chip_name
+                    except OSError:
+                        pass
+                readings = []
+                for inp in sorted(hw.glob("fan*_input")):
+                    m = _RE_FAN_INPUT.match(inp.name)
+                    if not m:
+                        continue
+                    stem = m.group(1)
+                    try:
+                        raw = int(inp.read_text(encoding="utf-8", errors="replace").strip())
+                    except (OSError, ValueError):
+                        continue
+                    lbl_f = hw / f"{stem}_label"
+                    label = ""
+                    if lbl_f.is_file():
+                        try:
+                            label = lbl_f.read_text(
+                                encoding="utf-8", errors="replace"
+                            ).strip()
+                        except OSError:
+                            pass
+                    readings.append({"label": label, "rpm": raw})
+                if readings:
+                    out["chips"][chip_name] = readings
+    return out
+
+
 @dataclass
 class DiskIoState:
     last: dict[str, Any] | None = None
@@ -1546,6 +1617,7 @@ def collect_snapshot(
         "network": net,
         "disk_io": disk_io,
         "thermal": _thermal_sensors(),
+        "fans": _fan_sensors(),
         "processes": _top_processes(process_sample_limit) if include_processes else [],
     }
 

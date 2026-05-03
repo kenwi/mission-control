@@ -215,7 +215,44 @@
         <button type="button" class="panel-collapse" aria-expanded="true" aria-controls="panel-body-thermal">−</button>
       </div>
       <div class="panel-body" id="panel-body-thermal">
-        <div id="thermal-table" class="table-wrap"></div>
+        <div class="storage-subsection" id="thermal-sensors-subsection">
+          <div class="storage-subsection-head">
+            <h3 class="storage-subheading" id="thermal-sensors-heading">Sensors</h3>
+            <button
+              type="button"
+              class="storage-subsection-collapse"
+              id="thermal-sensors-collapse"
+              aria-expanded="true"
+              aria-controls="thermal-sensors-body"
+              aria-label="Collapse Sensors"
+              title="Collapse Sensors"
+            >
+              −
+            </button>
+          </div>
+          <div id="thermal-sensors-body" class="storage-subsection-body">
+            <div id="thermal-table" class="table-wrap"></div>
+          </div>
+        </div>
+        <div class="storage-subsection" id="thermal-fans-subsection">
+          <div class="storage-subsection-head">
+            <h3 class="storage-subheading" id="thermal-fans-heading">Fans</h3>
+            <button
+              type="button"
+              class="storage-subsection-collapse"
+              id="thermal-fans-collapse"
+              aria-expanded="true"
+              aria-controls="thermal-fans-body"
+              aria-label="Collapse Fans"
+              title="Collapse Fans"
+            >
+              −
+            </button>
+          </div>
+          <div id="thermal-fans-body" class="storage-subsection-body">
+            <div id="thermal-fans-table" class="table-wrap"></div>
+          </div>
+        </div>
       </div>
     </section>
 
@@ -254,13 +291,43 @@
         <button type="button" class="panel-collapse" aria-expanded="true" aria-controls="panel-body-storage">−</button>
       </div>
       <div class="panel-body" id="panel-body-storage">
-        <div class="storage-subsection">
-          <h3 class="storage-subheading" id="storage-mounts-heading">Mounts</h3>
-          <div id="disk-table" class="table-wrap"></div>
+        <div class="storage-subsection" id="storage-mounts-subsection">
+          <div class="storage-subsection-head">
+            <h3 class="storage-subheading" id="storage-mounts-heading">Mounts</h3>
+            <button
+              type="button"
+              class="storage-subsection-collapse"
+              id="storage-mounts-collapse"
+              aria-expanded="true"
+              aria-controls="storage-mounts-body"
+              aria-label="Collapse Mounts"
+              title="Collapse Mounts"
+            >
+              −
+            </button>
+          </div>
+          <div id="storage-mounts-body" class="storage-subsection-body">
+            <div id="disk-table" class="table-wrap"></div>
+          </div>
         </div>
         <div id="zfs-pools-block" class="storage-subsection zfs-pools-block" hidden>
-          <h3 class="storage-subheading" id="storage-zfs-heading">ZFS pools</h3>
-          <div id="zfs-pools-table" class="table-wrap"></div>
+          <div class="storage-subsection-head">
+            <h3 class="storage-subheading" id="storage-zfs-heading">ZFS pools</h3>
+            <button
+              type="button"
+              class="storage-subsection-collapse"
+              id="storage-zfs-collapse"
+              aria-expanded="true"
+              aria-controls="storage-zfs-body"
+              aria-label="Collapse ZFS pools"
+              title="Collapse ZFS pools"
+            >
+              −
+            </button>
+          </div>
+          <div id="storage-zfs-body" class="storage-subsection-body">
+            <div id="zfs-pools-table" class="table-wrap"></div>
+          </div>
         </div>
         <div class="storage-subsection" id="storage-disk-io-subsection">
           <div class="storage-subsection-head">
@@ -291,7 +358,25 @@
         <button type="button" class="panel-collapse" aria-expanded="true" aria-controls="panel-body-network">−</button>
       </div>
       <div class="panel-body" id="panel-body-network">
-        <div id="net-table" class="table-wrap"></div>
+        <div class="storage-subsection" id="net-interfaces-subsection">
+          <div class="storage-subsection-head">
+            <h3 class="storage-subheading" id="net-interfaces-heading">Interfaces</h3>
+            <button
+              type="button"
+              class="storage-subsection-collapse"
+              id="net-interfaces-collapse"
+              aria-expanded="true"
+              aria-controls="net-interfaces-body"
+              aria-label="Collapse Interfaces"
+              title="Collapse Interfaces"
+            >
+              −
+            </button>
+          </div>
+          <div id="net-interfaces-body" class="storage-subsection-body">
+            <div id="net-table" class="table-wrap"></div>
+          </div>
+        </div>
       </div>
     </section>
 
