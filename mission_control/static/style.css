@@ -81,6 +81,105 @@
   --bar-track: #2a1810;
 }
 
+/* Deep violet + acid accent + warm warning (industrial sci‑fi cockpit) */
+[data-theme="cradle"] {
+  --bg: #0c0614;
+  --panel: #140a22;
+  --border: #2d1f4d;
+  --text: #ebe6f4;
+  --muted: #8f82ad;
+  --accent: #b7ff3a;
+  --warn: #ff8f4d;
+  --crit: #ff3d6a;
+  --cpu: #2effd9;
+  --mem: #c97bff;
+  --swap: #6b5c8c;
+  --header-top: #0f081a;
+  --bar-track: #1c1030;
+}
+
+[data-theme="synthwave"] {
+  --bg: #0c0418;
+  --panel: #14082a;
+  --border: #3d2166;
+  --text: #f2e8ff;
+  --muted: #a08fc4;
+  --accent: #ff3dac;
+  --warn: #ffe566;
+  --crit: #ff4d6a;
+  --cpu: #0fffc7;
+  --mem: #c16aff;
+  --swap: #7a5fa8;
+  --header-top: #10052a;
+  --bar-track: #200f45;
+}
+
+[data-theme="frostline"] {
+  --bg: #080f14;
+  --panel: #0c161d;
+  --border: #1a3545;
+  --text: #e4f2f8;
+  --muted: #6d93a8;
+  --accent: #5ee7d8;
+  --warn: #f5d565;
+  --crit: #f87595;
+  --cpu: #5cbbff;
+  --mem: #9bb5ff;
+  --swap: #5c7285;
+  --header-top: #0a1219;
+  --bar-track: #12212c;
+}
+
+/* Amber phosphor on near-black */
+[data-theme="phosphor"] {
+  --bg: #070605;
+  --panel: #0f0c08;
+  --border: #3a3020;
+  --text: #ffecc8;
+  --muted: #a88f68;
+  --accent: #ffb020;
+  --warn: #ff8c1a;
+  --crit: #ff5c30;
+  --cpu: #ffd24a;
+  --mem: #ffdf80;
+  --swap: #8a7860;
+  --header-top: #0a0806;
+  --bar-track: #1a1510;
+}
+
+[data-theme="verdant"] {
+  --bg: #060a08;
+  --panel: #0c120f;
+  --border: #1e3528;
+  --text: #e8f5ec;
+  --muted: #6d957c;
+  --accent: #5ee87a;
+  --warn: #e8c547;
+  --crit: #f08070;
+  --cpu: #5ce0e8;
+  --mem: #b8f070;
+  --swap: #5a705d;
+  --header-top: #080e0a;
+  --bar-track: #14241c;
+}
+
+/* Green phosphor terminal (think iconic “digital rain” HUD) */
+[data-theme="operator"] {
+  --bg: #020403;
+  --panel: #050c08;
+  --border: #124a2e;
+  --text: #baf5cb;
+  --muted: #4a8f64;
+  --accent: #00ff66;
+  --warn: #d4ff47;
+  --crit: #ff4d4d;
+  --cpu: #00ffc8;
+  --mem: #9bff2e;
+  --swap: #3f6b52;
+  --header-top: #030a06;
+  --bar-track: #0a1f14;
+}
+
 * {
   box-sizing: border-box;
 }

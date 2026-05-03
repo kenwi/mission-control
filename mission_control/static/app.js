@@ -4,6 +4,12 @@ const THEMES = [
   { id: "midnight", label: "Midnight" },
   { id: "dawn", label: "Dawn" },
   { id: "ember", label: "Ember" },
+  { id: "cradle", label: "Geo cradle" },
+  { id: "synthwave", label: "Neon dusk" },
+  { id: "frostline", label: "Frostline" },
+  { id: "phosphor", label: "Phosphor" },
+  { id: "verdant", label: "Verdant" },
+  { id: "operator", label: "Operator deck" },
 ];
 
 const THEME_STORAGE_KEY = "mc-theme";
