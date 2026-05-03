@@ -47,6 +47,7 @@ Click the **settings** control (gear) to open **Options**:
 - **Header title**: Custom label and optional **show/hide** for the title line (host line and status stay visible).
 - **Theme** and **clock** (12h / 24h).
 - **Process memory column**: Percent only, RSS in MB or GB, or both; MB/GB applies when bytes are shown.
+- **Process CPU column**: **All CPUs** (default, same scale as the Compute tile) or **per logical CPU** (psutil-style; can exceed **100%**). Row tooltips show the other scale for comparison.
 - **Visible panels**: Toggle sections; you can also **drag** section headers to reorder and use **−** / **+** to collapse.
 - **Update interval**: Seconds between SSE snapshots; the UI uses fixed steps **0.25 s through 30 s** (same bounds as `/api/stream`). Values outside that range are clamped; values between steps snap to the nearest step.
 - **Pause live updates**: Stops the stream (status shows **paused**); unpause reconnects with the current interval.
@@ -58,7 +59,7 @@ Preferences live in the browser’s **localStorage**. A full export includes key
 
 ### Top processes
 
-Filter by name, limit row count, and sort by column header (**PID**, **Name**, **CPU**, **MEM**). Memory sorting follows the configured display (percent vs RSS). Optionally show a **footer row** with the **sum of RSS** for the processes currently listed (toggle in Options).
+Filter by name, limit row count, and sort by column header (**PID**, **Name**, **CPU**, **MEM**). **CPU** defaults to each process’s share of **all logical CPUs** (aligned with the Compute tile). Options can switch the column to **per logical CPU** (where **100%** is one core and multi-core work can exceed **100%**); the cell tooltip always shows the complementary value. Memory sorting follows the configured display (percent vs RSS). Optionally show a **footer row** with the **sum of RSS** for the processes currently listed (toggle in Options). **Click a row** (or focus it and press **Enter** or **Space**) to open a dialog with extended process information (fetched on demand from `/api/process/{pid}`).
 
 ### Operations
 
@@ -73,6 +74,7 @@ When upgrades exist, expand the APT summary to list packages with **installed an
 | `GET` | `/api/health` | `{"status":"ok"}` |
 | `GET` | `/api/metrics` | Single JSON snapshot (same shape as SSE payloads) |
 | `GET` | `/api/stream?interval=1` | SSE stream; `interval` in seconds, **0.25 to 30** inclusive |
+| `GET` | `/api/process/{pid}` | Process detail for a live PID (JSON); **404** if the process is gone |
 
 ## Project layout
 

@@ -88,6 +88,7 @@ def _net_io() -> dict[str, Any]:
 
 
 def _top_processes(limit: int = 12) -> list[dict[str, Any]]:
+    n_cpu = psutil.cpu_count(logical=True) or 1
     candidates: list[psutil.Process] = []
     for p in psutil.process_iter(["pid", "name"]):
         try:
@@ -111,17 +112,142 @@ def _top_processes(limit: int = 12) -> list[dict[str, Any]]:
             with p.oneshot():
                 name = p.name()
                 rss = int(p.memory_info().rss or 0)
+            cpu_machine = round(cpu / n_cpu, 1)
             out.append(
                 {
                     "pid": p.pid,
                     "name": name,
                     "cpu_percent": round(cpu, 1),
+                    "cpu_percent_machine": cpu_machine,
                     "memory_percent": round(mem, 1),
                     "memory_rss": rss,
                 }
             )
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             continue
+    return out
+
+
+def _jsonable_process_value(val: Any) -> Any:
+    if val is None:
+        return None
+    if isinstance(val, (bool, int, float, str)):
+        return val
+    if isinstance(val, bytes):
+        return val.decode("utf-8", errors="replace")
+    if isinstance(val, (list, tuple)):
+        return [_jsonable_process_value(x) for x in val]
+    if hasattr(val, "_asdict"):
+        return {k: _jsonable_process_value(v) for k, v in val._asdict().items()}
+    if isinstance(val, dict):
+        return {str(k): _jsonable_process_value(v) for k, v in val.items()}
+    return str(val)
+
+
+_PROCESS_DETAIL_ATTRS: tuple[str, ...] = (
+    "ppid",
+    "name",
+    "exe",
+    "cmdline",
+    "cwd",
+    "status",
+    "username",
+    "create_time",
+    "terminal",
+    "nice",
+    "ionice",
+    "cpu_num",
+    "cpu_affinity",
+    "cpu_percent",
+    "cpu_times",
+    "memory_info",
+    "memory_full_info",
+    "memory_percent",
+    "num_threads",
+    "threads",
+    "num_ctx_switches",
+    "num_fds",
+    "io_counters",
+)
+
+
+def collect_process_detail(pid: int) -> dict[str, Any]:
+    """Return JSON-friendly fields for a live PID, or ``{"error": "no_such_process"}``."""
+    out: dict[str, Any] = {"pid": int(pid), "ts": time.time()}
+    try:
+        proc = psutil.Process(pid)
+    except psutil.NoSuchProcess:
+        out["error"] = "no_such_process"
+        return out
+
+    try:
+        proc.cpu_percent(interval=None)
+    except psutil.NoSuchProcess:
+        out["error"] = "no_such_process"
+        return out
+    except (psutil.AccessDenied, PermissionError):
+        pass
+
+    try:
+        raw = proc.as_dict(attrs=list(_PROCESS_DETAIL_ATTRS), ad_value=None)
+    except psutil.NoSuchProcess:
+        out["error"] = "no_such_process"
+        return out
+
+    for key, val in raw.items():
+        out[key] = _jsonable_process_value(val)
+
+    limit = 80
+    for label, getter in (
+        ("open_files", lambda: proc.open_files()),
+        ("connections", lambda: proc.connections(kind="inet")),
+    ):
+        try:
+            items = list(getter())
+            out[f"{label}_count"] = len(items)
+            out[label] = _jsonable_process_value(items[:limit])
+            if len(items) > limit:
+                out[f"{label}_truncated"] = True
+        except (psutil.AccessDenied, psutil.ZombieProcess):
+            out[label] = None
+            out[f"{label}_count"] = None
+        except NotImplementedError:
+            out[f"{label}_error"] = "not_implemented"
+        except Exception as err:
+            out[f"{label}_error"] = type(err).__name__
+
+    try:
+        ch = proc.children(recursive=False)
+        out["children"] = [{"pid": c.pid, "name": c.name()} for c in ch[:50]]
+        out["children_count"] = len(ch)
+        if len(ch) > 50:
+            out["children_truncated"] = True
+    except (psutil.AccessDenied, psutil.NoSuchProcess):
+        out["children"] = None
+        out["children_count"] = None
+    except Exception:
+        out["children_error"] = "unavailable"
+
+    try:
+        parent = proc.parent()
+        if parent is not None:
+            out["parent"] = {"pid": parent.pid, "name": parent.name()}
+    except (psutil.AccessDenied, psutil.NoSuchProcess):
+        out["parent"] = None
+    except Exception:
+        out["parent"] = None
+
+    for attr in ("uids", "gids"):
+        try:
+            out[attr] = _jsonable_process_value(getattr(proc, attr)())
+        except Exception:
+            pass
+
+    n_cpu = psutil.cpu_count(logical=True) or 1
+    cpu_p = out.get("cpu_percent")
+    if isinstance(cpu_p, (int, float)):
+        out["cpu_percent_machine"] = round(float(cpu_p) / n_cpu, 1)
+
     return out
 
 

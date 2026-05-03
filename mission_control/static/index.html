@@ -72,6 +72,13 @@
         </select>
       </div>
       <div class="mc-settings-field">
+        <label for="proc-cpu-scale-select" class="mc-settings-label">Process CPU column</label>
+        <select id="proc-cpu-scale-select" class="mc-theme-select mc-settings-control" aria-label="How CPU % is scaled in the top processes table">
+          <option value="machine" selected>All CPUs (like Compute tile)</option>
+          <option value="per_core">Per logical CPU (can exceed 100%)</option>
+        </select>
+      </div>
+      <div class="mc-settings-field">
         <label class="mc-settings-check">
           <input type="checkbox" id="proc-footer-rss-total" checked />
           <span>Show total RSS for listed processes</span>
@@ -227,6 +234,23 @@
       </div>
     </section>
   </main>
+
+  <div id="proc-detail-backdrop" class="mc-modal-backdrop" hidden aria-hidden="true"></div>
+  <div
+    id="proc-detail-dialog"
+    class="mc-modal"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="proc-detail-title"
+    hidden
+    aria-hidden="true"
+  >
+    <div class="mc-modal-head">
+      <h2 id="proc-detail-title" class="mc-modal-title">Process</h2>
+      <button type="button" id="proc-detail-close" class="mc-modal-close" aria-label="Close process details">×</button>
+    </div>
+    <div id="proc-detail-body" class="mc-modal-body"></div>
+  </div>
 
   <script src="/assets/app.js" defer></script>
 </body>

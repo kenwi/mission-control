@@ -469,6 +469,10 @@ function refreshAllSettingsFromStorage() {
   if (pUnit) pUnit.value = procMemUnit;
   syncProcMemUnitFieldVisibility();
 
+  procCpuScale = loadProcCpuScale();
+  const cpuScaleSel = document.getElementById("proc-cpu-scale-select");
+  if (cpuScaleSel) cpuScaleSel.value = procCpuScale;
+
   const procFooter = document.getElementById("proc-footer-rss-total");
   if (procFooter) procFooter.checked = loadProcFooterRssTotalVisible();
 
@@ -794,7 +798,202 @@ function escapeHtml(s) {
     .replace(/"/g, "&quot;");
 }
 
+const PROC_DETAIL_PRIORITY = [
+  "pid",
+  "ppid",
+  "name",
+  "status",
+  "username",
+  "terminal",
+  "exe",
+  "cwd",
+  "create_time",
+  "nice",
+  "ionice",
+  "cpu_num",
+  "cpu_affinity",
+  "cpu_percent",
+  "cpu_percent_machine",
+  "cpu_times",
+  "memory_percent",
+  "memory_info",
+  "memory_full_info",
+  "num_threads",
+  "num_ctx_switches",
+  "num_fds",
+  "io_counters",
+  "uids",
+  "gids",
+  "parent",
+  "children_count",
+  "open_files_count",
+  "connections_count",
+];
+
+function formatProcessDetailScalar(key, val) {
+  if (val == null) return "—";
+  if (key === "create_time" && typeof val === "number") {
+    try {
+      const d = new Date(val * 1000);
+      return `${val} (${d.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "medium" })})`;
+    } catch (_) {
+      return String(val);
+    }
+  }
+  if (
+    (key === "memory_info" || key === "memory_full_info") &&
+    val &&
+    typeof val === "object"
+  ) {
+    const parts = [];
+    if (val.rss != null) parts.push(`rss ${formatBytes(val.rss)}`);
+    if (val.vms != null) parts.push(`vms ${formatBytes(val.vms)}`);
+    if (val.shared != null) parts.push(`shared ${formatBytes(val.shared)}`);
+    if (val.data != null) parts.push(`data ${formatBytes(val.data)}`);
+    if (val.lib != null) parts.push(`lib ${formatBytes(val.lib)}`);
+    if (parts.length) return `${parts.join(" · ")} · ${JSON.stringify(val)}`;
+  }
+  if (typeof val === "object") {
+    try {
+      return JSON.stringify(val);
+    } catch (_) {
+      return String(val);
+    }
+  }
+  return String(val);
+}
+
+function renderProcessDetailHtml(data) {
+  if (!data) return "<p class=\"tile-meta\">No data.</p>";
+  const skipRest = new Set([
+    "cmdline",
+    "open_files",
+    "connections",
+    "children",
+    "threads",
+    "ts",
+  ]);
+  const shown = new Set();
+  let html = "<dl class=\"proc-detail-dl\">";
+  for (const k of PROC_DETAIL_PRIORITY) {
+    if (!Object.prototype.hasOwnProperty.call(data, k)) continue;
+    const v = data[k];
+    if (v == null && k !== "cpu_percent" && k !== "cpu_percent_machine" && k !== "memory_percent") continue;
+    shown.add(k);
+    html += `<dt>${escapeHtml(k)}</dt><dd>${escapeHtml(formatProcessDetailScalar(k, v))}</dd>`;
+  }
+  const restKeys = Object.keys(data).filter(
+    (k) => !shown.has(k) && !skipRest.has(k) && k !== "error"
+  );
+  restKeys.sort();
+  for (const k of restKeys) {
+    const v = data[k];
+    if (v == null) continue;
+    html += `<dt>${escapeHtml(k)}</dt><dd>${escapeHtml(formatProcessDetailScalar(k, v))}</dd>`;
+  }
+  html += "</dl>";
+  const cmdline = data.cmdline;
+  const cmd =
+    Array.isArray(cmdline) ? cmdline.join(" ") : typeof cmdline === "string" ? cmdline : "";
+  if (cmd) {
+    html +=
+      "<div class=\"proc-detail-cmdwrap\"><div class=\"proc-detail-cmdlabel\">Command line</div>" +
+      `<pre class="proc-detail-cmd">${escapeHtml(cmd)}</pre></div>`;
+  }
+  html +=
+    "<details class=\"proc-detail-raw\"><summary>All fields (JSON)</summary>" +
+    `<pre class="proc-detail-json">${escapeHtml(JSON.stringify(data, null, 2))}</pre></details>`;
+  return html;
+}
+
+let procDetailModalBound = false;
+
+function closeProcessDetailModal() {
+  const backdrop = document.getElementById("proc-detail-backdrop");
+  const dialog = document.getElementById("proc-detail-dialog");
+  if (backdrop) {
+    backdrop.hidden = true;
+    backdrop.setAttribute("aria-hidden", "true");
+  }
+  if (dialog) {
+    dialog.hidden = true;
+    dialog.setAttribute("aria-hidden", "true");
+  }
+}
+
+function openProcessDetailModal(pid) {
+  const backdrop = document.getElementById("proc-detail-backdrop");
+  const dialog = document.getElementById("proc-detail-dialog");
+  const body = document.getElementById("proc-detail-body");
+  const title = document.getElementById("proc-detail-title");
+  if (!backdrop || !dialog || !body || !title) return;
+
+  title.textContent = `PID ${pid}`;
+  body.innerHTML = "<p class=\"tile-meta\">Loading…</p>";
+  backdrop.hidden = false;
+  dialog.hidden = false;
+  backdrop.setAttribute("aria-hidden", "false");
+  dialog.setAttribute("aria-hidden", "false");
+
+  const closeBtn = document.getElementById("proc-detail-close");
+  closeBtn?.focus();
+
+  fetch(`/api/process/${pid}`)
+    .then((res) => {
+      if (res.status === 404) throw new Error("Process not found (it may have exited).");
+      if (!res.ok) throw new Error(`Request failed (${res.status}).`);
+      return res.json();
+    })
+    .then((d) => {
+      title.textContent = `${d.name || "Process"} (PID ${d.pid})`;
+      body.innerHTML = renderProcessDetailHtml(d);
+    })
+    .catch((err) => {
+      title.textContent = `PID ${pid}`;
+      body.innerHTML = `<p class="tile-meta">${escapeHtml(err.message || String(err))}</p>`;
+    });
+}
+
+function initProcessDetailModal() {
+  const backdrop = document.getElementById("proc-detail-backdrop");
+  const closeBtn = document.getElementById("proc-detail-close");
+  closeBtn?.addEventListener("click", closeProcessDetailModal);
+  backdrop?.addEventListener("click", closeProcessDetailModal);
+
+  if (!procDetailModalBound) {
+    procDetailModalBound = true;
+    document.addEventListener("keydown", (e) => {
+      if (e.key !== "Escape") return;
+      const dialog = document.getElementById("proc-detail-dialog");
+      if (dialog && !dialog.hidden) closeProcessDetailModal();
+    });
+  }
+}
+
+function initProcessTableRowClicks() {
+  const wrap = document.getElementById("proc-table");
+  if (!wrap || wrap.dataset.procRowDetailBound === "1") return;
+  wrap.dataset.procRowDetailBound = "1";
+  wrap.addEventListener("click", (e) => {
+    const tr = e.target.closest("tbody tr.proc-row-detail");
+    if (!tr || !wrap.contains(tr)) return;
+    const pid = parseInt(tr.getAttribute("data-pid") || "", 10);
+    if (!Number.isFinite(pid)) return;
+    openProcessDetailModal(pid);
+  });
+  wrap.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter" && e.key !== " ") return;
+    const tr = e.target.closest("tbody tr.proc-row-detail");
+    if (!tr || !wrap.contains(tr)) return;
+    e.preventDefault();
+    const pid = parseInt(tr.getAttribute("data-pid") || "", 10);
+    if (!Number.isFinite(pid)) return;
+    openProcessDetailModal(pid);
+  });
+}
+
 let lastProcesses = [];
+let lastSnapshotLogicalCpus = 1;
 let lastAptPackages = null;
 const APT_PACKAGES_EXPANDED_KEY = "mc-ops-apt-packages-expanded";
 const APT_PKG_SEARCH_KEY = "mc-apt-pkg-search";
@@ -861,9 +1060,20 @@ function fmtProcPct(n) {
 
 const PROC_MEM_UNIT_KEY = "mc-proc-mem-unit";
 const PROC_MEM_DISPLAY_KEY = "mc-proc-mem-display";
+const PROC_CPU_SCALE_KEY = "mc-proc-cpu-scale";
 let procMemUnit = "mb";
 /** @type {"percent"|"bytes"|"both"} */
 let procMemDisplay = "both";
+/** @type {"machine"|"per_core"} */
+let procCpuScale = "machine";
+
+function loadProcCpuScale() {
+  try {
+    return localStorage.getItem(PROC_CPU_SCALE_KEY) === "per_core" ? "per_core" : "machine";
+  } catch (_) {
+    return "machine";
+  }
+}
 
 function loadProcMemUnit() {
   try {
@@ -892,6 +1102,21 @@ function syncProcMemUnitFieldVisibility() {
 function initProcMemUnitControl() {
   procMemUnit = loadProcMemUnit();
   procMemDisplay = loadProcMemDisplay();
+  procCpuScale = loadProcCpuScale();
+
+  const cpuScaleSel = document.getElementById("proc-cpu-scale-select");
+  if (cpuScaleSel) {
+    cpuScaleSel.value = procCpuScale;
+    cpuScaleSel.addEventListener("change", () => {
+      procCpuScale = cpuScaleSel.value === "per_core" ? "per_core" : "machine";
+      try {
+        localStorage.setItem(PROC_CPU_SCALE_KEY, procCpuScale);
+      } catch (_) {
+        /* ignore */
+      }
+      renderProcsTable();
+    });
+  }
 
   const displaySel = document.getElementById("proc-mem-display-select");
   if (displaySel) {
@@ -974,6 +1199,7 @@ const MC_SETTINGS_KEYS = [
   PROC_FOOTER_RSS_TOTAL_KEY,
   PROC_MEM_UNIT_KEY,
   PROC_MEM_DISPLAY_KEY,
+  PROC_CPU_SCALE_KEY,
   PROC_SORT_KEYDIR_KEY,
 ];
 
@@ -1055,7 +1281,11 @@ function cmpProcRows(a, b) {
       });
       break;
     case "cpu":
-      cmp = a.cpu_percent - b.cpu_percent;
+      if (procCpuScale === "per_core") {
+        cmp = (a.cpu_percent || 0) - (b.cpu_percent || 0);
+      } else {
+        cmp = (a.cpu_percent_machine || 0) - (b.cpu_percent_machine || 0);
+      }
       break;
     case "mem":
       if (procMemDisplay === "percent") {
@@ -1118,13 +1348,21 @@ function renderProcsTable() {
     return;
   }
 
-  let list = raw.map((p) => ({
-    pid: p.pid,
-    name: p.name,
-    cpu_percent: Number(p.cpu_percent) || 0,
-    memory_percent: Number(p.memory_percent) || 0,
-    memory_rss: Number(p.memory_rss) || 0,
-  }));
+  let list = raw.map((p) => {
+    const cpuRaw = Number(p.cpu_percent) || 0;
+    let cpuM = Number(p.cpu_percent_machine);
+    if (!Number.isFinite(cpuM)) {
+      cpuM = cpuRaw / Math.max(1, lastSnapshotLogicalCpus || 1);
+    }
+    return {
+      pid: p.pid,
+      name: p.name,
+      cpu_percent: cpuRaw,
+      cpu_percent_machine: cpuM,
+      memory_percent: Number(p.memory_percent) || 0,
+      memory_rss: Number(p.memory_rss) || 0,
+    };
+  });
 
   if (q) {
     list = list.filter((p) => String(p.name || "").toLowerCase().includes(q));
@@ -1138,7 +1376,7 @@ function renderProcsTable() {
   const meta =
     totalMatching === 0 && q
       ? `<p class="proc-table-meta">No matches for '${escapeHtml(q)}' · ${raw.length} processes in sample</p>`
-      : `<p class="proc-table-meta">Showing ${shown.length} of ${totalMatching}${q ? " matching" : ""} · ${raw.length} in sample</p>`;
+      : `<p class="proc-table-meta">Showing ${shown.length} of ${totalMatching}${q ? " matching" : ""} · ${raw.length} in sample · click a row for details</p>`;
 
   if (!shown.length) {
     wrap.innerHTML =
@@ -1151,15 +1389,28 @@ function renderProcsTable() {
 
   const memColW = procMemDisplay === "percent" ? "4.25rem" : "8.5rem";
 
+  const cpuThTitle =
+    procCpuScale === "per_core"
+      ? "Per logical CPU (100% = one core; can exceed 100%). Hover a row for share of all CPUs."
+      : "Share of all logical CPUs (matches Compute). Hover a row for per-core %.";
+
   const rows = shown
-    .map(
-      (p) =>
-        `<tr><td class="proc-td-pid">${fmtProcPid(p.pid)}</td><td class="proc-td-name" title="${escapeHtml(p.name)}">${escapeHtml(
-          p.name
-        )}</td><td class="proc-td-metric">${fmtProcPct(p.cpu_percent)}</td><td class="proc-td-metric proc-td-mem">${fmtProcMemCell(
-          p
-        )}</td></tr>`
-    )
+    .map((p) => {
+      const cpuMain = procCpuScale === "per_core" ? p.cpu_percent : p.cpu_percent_machine;
+      const cpuTip =
+        procCpuScale === "per_core"
+          ? `All CPUs: ${fmtProcPct(p.cpu_percent_machine).trim()}`
+          : `Per logical CPU: ${fmtProcPct(p.cpu_percent).trim()}`;
+      return `<tr class="proc-row-detail" role="button" tabindex="0" data-pid="${
+        p.pid
+      }" title="Process details" aria-label="Open details for process ${p.pid}"><td class="proc-td-pid">${fmtProcPid(
+        p.pid
+      )}</td><td class="proc-td-name" title="${escapeHtml(p.name)}">${escapeHtml(
+        p.name
+      )}</td><td class="proc-td-metric" title="${escapeHtml(cpuTip)}">${fmtProcPct(
+        cpuMain
+      )}</td><td class="proc-td-metric proc-td-mem">${fmtProcMemCell(p)}</td></tr>`;
+    })
     .join("");
 
   const totalRss = shown.reduce((s, p) => s + (Number(p.memory_rss) || 0), 0);
@@ -1185,7 +1436,7 @@ function renderProcsTable() {
     </colgroup><thead><tr>
       <th class="proc-th proc-th-pid proc-sortable" scope="col" data-sort-key="pid" role="columnheader" tabindex="0" aria-sort="${procSortAriaSort("pid")}">PID${procSortArrowHtml("pid")}</th>
       <th class="proc-th proc-th-name proc-sortable" scope="col" data-sort-key="name" role="columnheader" tabindex="0" aria-sort="${procSortAriaSort("name")}">Name${procSortArrowHtml("name")}</th>
-      <th class="proc-th proc-th-metric proc-sortable" scope="col" data-sort-key="cpu" role="columnheader" tabindex="0" aria-sort="${procSortAriaSort("cpu")}">CPU${procSortArrowHtml("cpu")}</th>
+      <th class="proc-th proc-th-metric proc-sortable" scope="col" data-sort-key="cpu" role="columnheader" tabindex="0" aria-sort="${procSortAriaSort("cpu")}" title="${escapeHtml(cpuThTitle)}">CPU${procSortArrowHtml("cpu")}</th>
       <th class="proc-th proc-th-metric proc-sortable" scope="col" data-sort-key="mem" role="columnheader" tabindex="0" aria-sort="${procSortAriaSort("mem")}">MEM${procSortArrowHtml("mem")}</th>
     </tr></thead><tbody>${rows}</tbody>${footer}</table>`;
 }
@@ -1217,6 +1468,7 @@ function initProcessControls() {
     saveProcPrefs();
     renderProcsTable();
   });
+  initProcessTableRowClicks();
   renderProcsTable();
 }
 
@@ -1431,6 +1683,7 @@ function applySnapshot(data) {
     la ? `load ${la.map((x) => x.toFixed(2)).join(" ")}` : "load —"
   );
   setBar("cpu-bar", cpu.percent || 0);
+  lastSnapshotLogicalCpus = Number(cpu.count_logical) || 1;
 
   const mem = data.memory || {};
   setText(
@@ -1528,6 +1781,7 @@ initClockFormatControl();
 initProcMemUnitControl();
 initSettingsDrawer();
 initSettingsBackup();
+initProcessDetailModal();
 initPanelLayout();
 initPanelVisibilityControls();
 initAptPackagesToggle();

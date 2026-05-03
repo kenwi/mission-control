@@ -7,11 +7,11 @@ import json
 import time
 from pathlib import Path
 
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from mission_control.metrics import NetRateState, collect_snapshot
+from mission_control.metrics import NetRateState, collect_process_detail, collect_snapshot
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
@@ -40,6 +40,16 @@ def metrics() -> dict:
         _slow_last = now
     sample = collect_snapshot(cpu_sample_interval=0.15, net_state=_net_state, include_slow=include_slow)
     return sample
+
+
+@app.get("/api/process/{pid}")
+def process_detail(pid: int) -> dict:
+    if pid < 1:
+        raise HTTPException(status_code=400, detail="Invalid PID")
+    data = collect_process_detail(pid)
+    if data.get("error") == "no_such_process":
+        raise HTTPException(status_code=404, detail="No such process")
+    return data
 
 
 @app.get("/api/stream")
