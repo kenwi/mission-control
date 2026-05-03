@@ -224,6 +224,7 @@ function initPanelVisibilityControls() {
       next[id] = input.checked;
       savePanelVisibility(next);
       applyPanelVisibility();
+      if (id === "processes") connectMetricsStream();
     });
   }
   applyPanelVisibility();
@@ -352,6 +353,15 @@ function loadUpdateInterval() {
 
 let metricsEventSource = null;
 
+/** Whether the live stream should collect top processes (server skips work when false). */
+function streamIncludeProcesses() {
+  const section = document.querySelector('section.panel[data-panel-id="processes"]');
+  if (!section) return true;
+  if (section.hidden) return false;
+  if (section.classList.contains("is-collapsed")) return false;
+  return true;
+}
+
 function connectMetricsStream() {
   if (metricsEventSource) {
     metricsEventSource.close();
@@ -366,7 +376,8 @@ function connectMetricsStream() {
     return;
   }
   const sec = loadUpdateInterval();
-  const u = `/api/stream?interval=${encodeURIComponent(String(sec))}`;
+  const procs = streamIncludeProcesses();
+  const u = `/api/stream?interval=${encodeURIComponent(String(sec))}&processes=${procs}`;
   metricsEventSource = new EventSource(u);
   metricsEventSource.onmessage = (ev) => {
     try {
@@ -708,6 +719,7 @@ function togglePanelCollapse(section) {
     /* ignore */
   }
   syncCollapseButton(section);
+  if (id === "processes") connectMetricsStream();
 }
 
 function initPanelLayout() {

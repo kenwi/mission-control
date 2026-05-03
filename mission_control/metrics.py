@@ -415,6 +415,7 @@ def collect_snapshot(
     net_state: NetRateState,
     *,
     include_slow: bool = False,
+    include_processes: bool = True,
 ) -> dict[str, Any]:
     """Build one metrics snapshot. cpu_sample_interval None = non-blocking (may be 0 first call)."""
     vm = psutil.virtual_memory()
@@ -448,7 +449,7 @@ def collect_snapshot(
         },
         "disk": _disk_mounts(),
         "network": net,
-        "processes": _top_processes(200),
+        "processes": _top_processes(200) if include_processes else [],
     }
 
     if include_slow:

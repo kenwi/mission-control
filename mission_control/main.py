@@ -32,13 +32,18 @@ def health() -> dict[str, str]:
 
 
 @app.get("/api/metrics")
-def metrics() -> dict:
+def metrics(processes: bool = Query(True)) -> dict:
     global _slow_last
     now = time.time()
     include_slow = (now - _slow_last) >= SLOW_INTERVAL_SEC
     if include_slow:
         _slow_last = now
-    sample = collect_snapshot(cpu_sample_interval=0.15, net_state=_net_state, include_slow=include_slow)
+    sample = collect_snapshot(
+        cpu_sample_interval=0.15,
+        net_state=_net_state,
+        include_slow=include_slow,
+        include_processes=processes,
+    )
     return sample
 
 
@@ -53,12 +58,23 @@ def process_detail(pid: int) -> dict:
 
 
 @app.get("/api/stream")
-async def stream(interval: float = Query(1.0, ge=0.25, le=30.0)):
-    """SSE: live metrics; `interval` is seconds between snapshots (0.25–30)."""
+async def stream(
+    interval: float = Query(1.0, ge=0.25, le=30.0),
+    processes: bool = Query(True),
+):
+    """SSE: live metrics; `interval` is seconds between snapshots (0.25–30).
+
+    Set ``processes=false`` to omit top-process collection (empty ``processes`` list).
+    """
 
     async def gen():
         global _slow_last
-        collect_snapshot(cpu_sample_interval=0.15, net_state=_net_state, include_slow=False)
+        collect_snapshot(
+            cpu_sample_interval=0.15,
+            net_state=_net_state,
+            include_slow=False,
+            include_processes=processes,
+        )
         while True:
             now = time.time()
             include_slow = (now - _slow_last) >= SLOW_INTERVAL_SEC
@@ -68,6 +84,7 @@ async def stream(interval: float = Query(1.0, ge=0.25, le=30.0)):
                 cpu_sample_interval=None,
                 net_state=_net_state,
                 include_slow=include_slow,
+                include_processes=processes,
             )
             line = "data: " + json.dumps(snap) + "\n\n"
             yield line.encode("utf-8")
