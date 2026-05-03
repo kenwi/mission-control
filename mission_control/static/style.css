@@ -891,6 +891,36 @@ table.mc-table.mc-table-procs {
   outline-offset: -2px;
 }
 
+.mc-theme-toast {
+  position: fixed;
+  left: 50%;
+  top: max(1.25rem, env(safe-area-inset-top, 0px));
+  transform: translateX(-50%) translateY(-0.4rem);
+  z-index: 400;
+  margin: 0;
+  padding: 0.65rem 1.35rem;
+  max-width: min(90vw, 26rem);
+  pointer-events: none;
+  background: color-mix(in srgb, var(--panel) 93%, var(--border));
+  color: var(--text);
+  border: 1px solid color-mix(in srgb, var(--accent) 38%, var(--border));
+  border-radius: 10px;
+  box-shadow: 0 14px 44px rgba(0, 0, 0, 0.38);
+  font-size: 0.95rem;
+  font-weight: 600;
+  font-family: var(--font-sans);
+  text-align: center;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.22s ease, transform 0.22s ease, visibility 0.22s;
+}
+
+.mc-theme-toast.is-visible {
+  opacity: 1;
+  visibility: visible;
+  transform: translateX(-50%) translateY(0);
+}
+
 .mc-modal-backdrop {
   position: fixed;
   inset: 0;

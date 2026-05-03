@@ -38,6 +38,56 @@ function applyTheme(id) {
   if (sel && sel.value !== themeId) sel.value = themeId;
 }
 
+let themeToastHideTimer = null;
+
+function showThemeToast(label) {
+  const el = document.getElementById("mc-theme-toast");
+  if (!el) return;
+  el.textContent = `Theme: ${label}`;
+  el.classList.add("is-visible");
+  if (themeToastHideTimer) clearTimeout(themeToastHideTimer);
+  themeToastHideTimer = setTimeout(() => {
+    themeToastHideTimer = null;
+    el.classList.remove("is-visible");
+  }, 2800);
+}
+
+function themeHotkeyTargetBlocks(el) {
+  if (!(el instanceof Element)) return false;
+  const tag = el.tagName;
+  if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return true;
+  if (el.isContentEditable) return true;
+  return false;
+}
+
+function cycleThemeWithHotkey(dir) {
+  const step = dir < 0 ? -1 : 1;
+  let cur = document.documentElement.getAttribute("data-theme");
+  if (!cur) {
+    try {
+      cur = localStorage.getItem(THEME_STORAGE_KEY) || "dark";
+    } catch (_) {
+      cur = "dark";
+    }
+  }
+  let idx = THEMES.findIndex((t) => t.id === cur);
+  if (idx < 0) idx = 0;
+  const n = THEMES.length;
+  const next = THEMES[(idx + step + n) % n];
+  applyTheme(next.id);
+  showThemeToast(next.label);
+}
+
+function initThemeHotkey() {
+  document.addEventListener("keydown", (e) => {
+    if (e.code !== "KeyT") return;
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    if (themeHotkeyTargetBlocks(e.target)) return;
+    e.preventDefault();
+    cycleThemeWithHotkey(e.shiftKey ? -1 : 1);
+  });
+}
+
 function initTheme() {
   let saved = "dark";
   try {
@@ -53,6 +103,7 @@ function initTheme() {
     sel.addEventListener("change", () => applyTheme(sel.value));
   }
   applyTheme(saved);
+  initThemeHotkey();
 }
 
 const CLOCK_FORMAT_KEY = "mc-clock-format";
