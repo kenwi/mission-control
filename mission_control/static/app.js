@@ -301,19 +301,19 @@ function initSettingsDrawer() {
   });
 }
 
-const PANEL_IDS = ["compute", "thermal", "operations", "storage", "disk_io", "network", "processes"];
+const PANEL_IDS = ["compute", "thermal", "operations", "storage", "network", "processes"];
 const PANEL_LABELS = {
   compute: "Compute",
   thermal: "Thermal",
   operations: "Operations",
   storage: "Storage",
-  disk_io: "Disk I/O",
   network: "Network",
   processes: "Top processes",
 };
 const PANEL_VISIBILITY_KEY = "mc-panel-visibility";
 const PANEL_ORDER_KEY = "mc-panel-order";
 const PANEL_COLLAPSED_KEY = "mc-panel-collapsed";
+const STORAGE_DISK_IO_COLLAPSED_KEY = "mc-storage-disk-io-collapsed";
 
 function loadPanelVisibility() {
   const d = {};
@@ -323,6 +323,9 @@ function loadPanelVisibility() {
     if (o && typeof o === "object") {
       for (const id of PANEL_IDS) {
         if (typeof o[id] === "boolean") d[id] = o[id];
+      }
+      if ("disk_io" in o && typeof o.disk_io === "boolean") {
+        d.storage = d.storage || o.disk_io;
       }
     }
   } catch (_) {
@@ -367,7 +370,7 @@ function initPanelVisibilityControls() {
       next[id] = input.checked;
       savePanelVisibility(next);
       applyPanelVisibility();
-      if (id === "processes") connectMetricsStream();
+      if (id === "processes" || id === "storage") connectMetricsStream();
     });
   }
   applyPanelVisibility();
@@ -505,6 +508,16 @@ function streamIncludeProcesses() {
   return true;
 }
 
+/** Whether the server should read diskstats and fill ``disk_io`` (false when Storage / Disk I/O not shown). */
+function streamIncludeDiskIo() {
+  const section = document.querySelector('section.panel[data-panel-id="storage"]');
+  if (!section) return true;
+  if (section.hidden) return false;
+  if (section.classList.contains("is-collapsed")) return false;
+  if (loadStorageDiskIoCollapsed()) return false;
+  return true;
+}
+
 /** Max processes to pull from the server on each snapshot (0 = full machine scan). */
 function streamProcSampleLimit() {
   const el = document.getElementById("proc-limit");
@@ -529,8 +542,9 @@ function connectMetricsStream() {
   }
   const sec = loadUpdateInterval();
   const procs = streamIncludeProcesses();
+  const diskIo = streamIncludeDiskIo();
   const procLimit = streamProcSampleLimit();
-  const u = `/api/stream?interval=${encodeURIComponent(String(sec))}&processes=${procs}&proc_limit=${encodeURIComponent(String(procLimit))}`;
+  const u = `/api/stream?interval=${encodeURIComponent(String(sec))}&processes=${procs}&disk_io=${diskIo}&proc_limit=${encodeURIComponent(String(procLimit))}`;
   metricsEventSource = new EventSource(u);
   metricsEventSource.onmessage = (ev) => {
     try {
@@ -713,6 +727,7 @@ function refreshAllSettingsFromStorage() {
   loadNetSortKeyDir();
   loadDiskIoSortKeyDir();
   loadThermalSortKeyDir();
+  applyStorageDiskIoCollapsed();
   netRateUnit = loadNetRateUnit();
   const netRateSel = document.getElementById("net-rate-unit-select");
   if (netRateSel) netRateSel.value = netRateUnit;
@@ -793,6 +808,7 @@ function mergePanelOrder(saved) {
   const seen = new Set();
   const out = [];
   for (const id of saved) {
+    if (id === "disk_io") continue;
     if (known.has(id) && !seen.has(id)) {
       out.push(id);
       seen.add(id);
@@ -899,7 +915,7 @@ function togglePanelCollapse(section) {
     /* ignore */
   }
   syncCollapseButton(section);
-  if (id === "processes") connectMetricsStream();
+  if (id === "processes" || id === "storage") connectMetricsStream();
 }
 
 function initPanelLayout() {
@@ -1205,11 +1221,69 @@ function initDiskRowClicks() {
   });
 }
 
+function loadStorageDiskIoCollapsed() {
+  try {
+    return localStorage.getItem(STORAGE_DISK_IO_COLLAPSED_KEY) === "1";
+  } catch (_) {
+    return false;
+  }
+}
+
+function saveStorageDiskIoCollapsed(on) {
+  try {
+    localStorage.setItem(STORAGE_DISK_IO_COLLAPSED_KEY, on ? "1" : "0");
+  } catch (_) {
+    /* ignore */
+  }
+}
+
+function syncStorageDiskIoCollapseUi(subsection, btn) {
+  const body = document.getElementById("storage-disk-io-body");
+  const collapsed = subsection.classList.contains("is-collapsed");
+  if (btn) {
+    btn.setAttribute("aria-expanded", String(!collapsed));
+    btn.textContent = collapsed ? "+" : "−";
+    btn.setAttribute("aria-label", collapsed ? "Expand Disk I/O" : "Collapse Disk I/O");
+    btn.setAttribute("title", collapsed ? "Expand Disk I/O" : "Collapse Disk I/O");
+  }
+  if (body) {
+    body.hidden = collapsed;
+    body.setAttribute("aria-hidden", String(collapsed));
+  }
+}
+
+function applyStorageDiskIoCollapsed() {
+  const subsection = document.getElementById("storage-disk-io-subsection");
+  const btn = document.getElementById("storage-disk-io-collapse");
+  if (!subsection || !btn) return;
+  subsection.classList.toggle("is-collapsed", loadStorageDiskIoCollapsed());
+  syncStorageDiskIoCollapseUi(subsection, btn);
+}
+
+function initStorageDiskIoSubsectionCollapse() {
+  const subsection = document.getElementById("storage-disk-io-subsection");
+  const btn = document.getElementById("storage-disk-io-collapse");
+  if (!subsection || !btn || btn.dataset.diskIoSubCollapseBound === "1") return;
+  btn.dataset.diskIoSubCollapseBound = "1";
+  btn.addEventListener("click", () => {
+    const collapsed = !subsection.classList.contains("is-collapsed");
+    subsection.classList.toggle("is-collapsed", collapsed);
+    saveStorageDiskIoCollapsed(collapsed);
+    syncStorageDiskIoCollapseUi(subsection, btn);
+    connectMetricsStream();
+  });
+}
+
 function initStoragePanel() {
   loadDiskSortKeyDir();
+  loadDiskIoSortKeyDir();
   initDiskSortHeaderClicks();
+  initDiskIoSortHeaderClicks();
   initDiskRowClicks();
+  initDiskIoRowClicks();
   initZpoolRowClicks();
+  applyStorageDiskIoCollapsed();
+  initStorageDiskIoSubsectionCollapse();
 }
 
 const DISK_DETAIL_PRIORITY = [
@@ -1362,6 +1436,179 @@ function initDiskDetailModal() {
   const closeBtn = document.getElementById("disk-detail-close");
   closeBtn?.addEventListener("click", closeDiskDetailModal);
   backdrop?.addEventListener("click", closeDiskDetailModal);
+}
+
+const BLOCK_DEV_DETAIL_PRIORITY = [
+  "devname",
+  "devpath",
+  "smart_target_devname",
+  "smart_devpath",
+  "diskstats",
+  "sysfs",
+  "ts",
+];
+
+function renderSmartDetailHtml(s) {
+  if (!s || typeof s !== "object") return "<p class=\"tile-meta\">—</p>";
+  const parts = [];
+  if (s.health_passed === true) {
+    parts.push("<p class=\"ops-ok\"><strong>SMART health:</strong> PASSED</p>");
+  } else if (s.health_passed === false) {
+    parts.push("<p class=\"pct-crit\"><strong>SMART health:</strong> FAILED</p>");
+  } else {
+    parts.push("<p><strong>SMART health:</strong> —</p>");
+  }
+  if (s.message) {
+    parts.push(`<p class="tile-meta block-dev-smart-msg">${escapeHtml(s.message)}</p>`);
+  }
+  const rows = [];
+  if (s.exit_status != null && s.exit_status !== "") {
+    rows.push(
+      `<tr><th scope="row">smartctl exit</th><td><code>${escapeHtml(String(s.exit_status))}</code> <span class="tile-meta">(0 = ok; 2 = error)</span></td></tr>`
+    );
+  }
+  if (s.model_name) rows.push(`<tr><th scope="row">Model</th><td>${escapeHtml(s.model_name)}</td></tr>`);
+  if (s.serial_number) rows.push(`<tr><th scope="row">Serial</th><td>${escapeHtml(s.serial_number)}</td></tr>`);
+  if (s.firmware_version) {
+    rows.push(`<tr><th scope="row">Firmware</th><td>${escapeHtml(s.firmware_version)}</td></tr>`);
+  }
+  if (s.temperature_c != null && Number.isFinite(Number(s.temperature_c))) {
+    rows.push(
+      `<tr><th scope="row">Temperature</th><td>${escapeHtml(String(s.temperature_c))} °C</td></tr>`
+    );
+  }
+  if (s.power_on_hours != null && Number.isFinite(Number(s.power_on_hours))) {
+    rows.push(
+      `<tr><th scope="row">Power-on hours</th><td>${escapeHtml(String(s.power_on_hours))}</td></tr>`
+    );
+  }
+  if (s.nvme_critical_warning != null) {
+    rows.push(
+      `<tr><th scope="row">NVMe critical warning</th><td>${escapeHtml(String(s.nvme_critical_warning))}</td></tr>`
+    );
+  }
+  if (s.user_capacity_bytes != null && Number.isFinite(Number(s.user_capacity_bytes))) {
+    rows.push(
+      `<tr><th scope="row">Capacity</th><td>${escapeHtml(formatBytes(s.user_capacity_bytes))}</td></tr>`
+    );
+  }
+  if (rows.length) {
+    parts.push(`<table class="block-dev-smart-table"><tbody>${rows.join("")}</tbody></table>`);
+  }
+  if (s.smartctl_found === false && !s.message) {
+    parts.push("<p class=\"tile-meta\">smartctl not found on PATH (install smartmontools).</p>");
+  }
+  if (s.attributes_excerpt) {
+    parts.push(
+      `<details open class="proc-detail-raw"><summary>SMART attributes</summary><pre class="proc-detail-json">${escapeHtml(
+        s.attributes_excerpt
+      )}</pre></details>`
+    );
+  }
+  if (s.raw_excerpt) {
+    parts.push(
+      `<details class="proc-detail-raw"><summary>smartctl output</summary><pre class="proc-detail-json">${escapeHtml(
+        s.raw_excerpt
+      )}</pre></details>`
+    );
+  }
+  return parts.join("");
+}
+
+function renderBlockDevDetailHtml(data) {
+  if (!data) return "<p class=\"tile-meta\">No data.</p>";
+  const skipRest = new Set(["error", "smart"]);
+  const shown = new Set();
+  let html = "<dl class=\"proc-detail-dl\">";
+  for (const k of BLOCK_DEV_DETAIL_PRIORITY) {
+    if (!Object.prototype.hasOwnProperty.call(data, k)) continue;
+    const v = data[k];
+    if (v == null && k !== "diskstats") continue;
+    if ((k === "sysfs" || k === "diskstats") && v && typeof v === "object") {
+      shown.add(k);
+      html += `<dt>${escapeHtml(k)}</dt><dd><pre class="proc-detail-json proc-detail-json-inline">${escapeHtml(
+        JSON.stringify(v, null, 2)
+      )}</pre></dd>`;
+      continue;
+    }
+    shown.add(k);
+    html += `<dt>${escapeHtml(k)}</dt><dd>${escapeHtml(String(v))}</dd>`;
+  }
+  if (data.smart && typeof data.smart === "object") {
+    shown.add("smart");
+    html += `<dt>SMART</dt><dd class="block-dev-smart-dd">${renderSmartDetailHtml(data.smart)}</dd>`;
+  }
+  const restKeys = Object.keys(data).filter((k) => !shown.has(k) && !skipRest.has(k));
+  restKeys.sort();
+  for (const k of restKeys) {
+    const v = data[k];
+    if (v == null) continue;
+    if (typeof v === "object") {
+      html += `<dt>${escapeHtml(k)}</dt><dd><pre class="proc-detail-json proc-detail-json-inline">${escapeHtml(
+        JSON.stringify(v, null, 2)
+      )}</pre></dd>`;
+    } else {
+      html += `<dt>${escapeHtml(k)}</dt><dd>${escapeHtml(String(v))}</dd>`;
+    }
+  }
+  html += "</dl>";
+  html +=
+    "<details class=\"proc-detail-raw\"><summary>All fields (JSON)</summary>" +
+    `<pre class="proc-detail-json">${escapeHtml(JSON.stringify(data, null, 2))}</pre></details>`;
+  return html;
+}
+
+function closeBlockDevDetailModal() {
+  const backdrop = document.getElementById("block-dev-detail-backdrop");
+  const dialog = document.getElementById("block-dev-detail-dialog");
+  if (backdrop) {
+    backdrop.hidden = true;
+    backdrop.setAttribute("aria-hidden", "true");
+  }
+  if (dialog) {
+    dialog.hidden = true;
+    dialog.setAttribute("aria-hidden", "true");
+  }
+}
+
+function openBlockDevDetailModal(devname) {
+  const backdrop = document.getElementById("block-dev-detail-backdrop");
+  const dialog = document.getElementById("block-dev-detail-dialog");
+  const body = document.getElementById("block-dev-detail-body");
+  const title = document.getElementById("block-dev-detail-title");
+  if (!backdrop || !dialog || !body || !title) return;
+
+  title.textContent = devname;
+  body.innerHTML = "<p class=\"tile-meta\">Loading…</p>";
+  backdrop.hidden = false;
+  dialog.hidden = false;
+  backdrop.setAttribute("aria-hidden", "false");
+  dialog.setAttribute("aria-hidden", "false");
+
+  document.getElementById("block-dev-detail-close")?.focus();
+
+  const enc = encodeURIComponent(devname);
+  fetch(`/api/block/${enc}`)
+    .then((res) => {
+      if (res.status === 404) throw new Error("Block device not found.");
+      if (!res.ok) throw new Error(`Request failed (${res.status}).`);
+      return res.json();
+    })
+    .then((d) => {
+      title.textContent = d.devname || devname;
+      body.innerHTML = renderBlockDevDetailHtml(d);
+    })
+    .catch((err) => {
+      title.textContent = devname;
+      body.innerHTML = `<p class="tile-meta">${escapeHtml(err.message || String(err))}</p>`;
+    });
+}
+
+function initBlockDevDetailModal() {
+  const backdrop = document.getElementById("block-dev-detail-backdrop");
+  const closeBtn = document.getElementById("block-dev-detail-close");
+  closeBtn?.addEventListener("click", closeBlockDevDetailModal);
+  backdrop?.addEventListener("click", closeBlockDevDetailModal);
 }
 
 const ZPOOL_DETAIL_PRIORITY = [
@@ -1743,6 +1990,11 @@ function initModalEscapeToClose() {
     const thermalDlg = document.getElementById("thermal-detail-dialog");
     if (thermalDlg && !thermalDlg.hidden) {
       closeThermalDetailModal();
+      return;
+    }
+    const blockDevDlg = document.getElementById("block-dev-detail-dialog");
+    if (blockDevDlg && !blockDevDlg.hidden) {
+      closeBlockDevDetailModal();
       return;
     }
     const netDlg = document.getElementById("net-detail-dialog");
@@ -2219,7 +2471,7 @@ function cmpDiskIoRows(a, b) {
 }
 
 function initDiskIoSortHeaderClicks() {
-  const host = document.getElementById("panel-body-disk-io");
+  const host = document.getElementById("panel-body-storage");
   if (!host || host.dataset.diskIoSortBound === "1") return;
   host.dataset.diskIoSortBound = "1";
   host.addEventListener("click", (e) => {
@@ -2233,6 +2485,40 @@ function initDiskIoSortHeaderClicks() {
     if (!th || !host.contains(th)) return;
     e.preventDefault();
     onDiskIoColumnHeaderClick(th.getAttribute("data-sort-key") || "");
+  });
+}
+
+function initDiskIoRowClicks() {
+  const wrap = document.getElementById("disk-io-table");
+  if (!wrap || wrap.dataset.diskIoRowBound === "1") return;
+  wrap.dataset.diskIoRowBound = "1";
+  wrap.addEventListener("click", (e) => {
+    const tr = e.target.closest("tbody tr.disk-io-row-detail[data-devname]");
+    if (!tr || !wrap.contains(tr)) return;
+    const enc = tr.getAttribute("data-devname") || "";
+    let name = "";
+    try {
+      name = decodeURIComponent(enc);
+    } catch (_) {
+      return;
+    }
+    if (!name) return;
+    openBlockDevDetailModal(name);
+  });
+  wrap.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter" && e.key !== " ") return;
+    const tr = e.target.closest("tbody tr.disk-io-row-detail[data-devname]");
+    if (!tr || !wrap.contains(tr)) return;
+    e.preventDefault();
+    const enc = tr.getAttribute("data-devname") || "";
+    let name = "";
+    try {
+      name = decodeURIComponent(enc);
+    } catch (_) {
+      return;
+    }
+    if (!name) return;
+    openBlockDevDetailModal(name);
   });
 }
 
@@ -2259,7 +2545,10 @@ function renderDiskIo(dio) {
     .map((row) => {
       const rxd = Number.isFinite(row.read_bytes) ? formatBytes(row.read_bytes) : "—";
       const txd = Number.isFinite(row.write_bytes) ? formatBytes(row.write_bytes) : "—";
-      return `<tr><td class="disk-io-td-name">${escapeHtml(row.name)}</td><td class="disk-io-td-metric">${escapeHtml(
+      const enc = encodeURIComponent(row.name);
+      return `<tr class="disk-io-row-detail" role="button" tabindex="0" data-devname="${enc}" title="Device details" aria-label="Open details for block device ${escapeHtml(
+        row.name
+      )}"><td class="disk-io-td-name">${escapeHtml(row.name)}</td><td class="disk-io-td-metric">${escapeHtml(
         formatBytesPerSec(row.read_bps)
       )}</td><td class="disk-io-td-metric">${escapeHtml(
         formatBytesPerSec(row.write_bps)
@@ -2487,11 +2776,6 @@ function initThermalPanel() {
   loadThermalSortKeyDir();
   initThermalSortHeaderClicks();
   initThermalRowClicks();
-}
-
-function initDiskIoPanel() {
-  loadDiskIoSortKeyDir();
-  initDiskIoSortHeaderClicks();
 }
 
 function closeThermalDetailModal() {
@@ -2975,6 +3259,7 @@ const MC_SETTINGS_KEYS = [
   PANEL_VISIBILITY_KEY,
   PANEL_ORDER_KEY,
   PANEL_COLLAPSED_KEY,
+  STORAGE_DISK_IO_COLLAPSED_KEY,
   HEADER_TITLE_KEY,
   HEADER_TITLE_VISIBLE_KEY,
   STREAM_PAUSED_KEY,
@@ -3588,12 +3873,12 @@ initContentLayoutMaxControl();
 initContentPaddingControl();
 initProcMemUnitControl();
 initNetworkPanel();
-initDiskIoPanel();
 initThermalPanel();
 initSettingsDrawer();
 initSettingsBackup();
 initProcessDetailModal();
 initDiskDetailModal();
+initBlockDevDetailModal();
 initZpoolDetailModal();
 initNetDetailModal();
 initThermalDetailModal();

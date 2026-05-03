@@ -14,6 +14,7 @@ from fastapi.staticfiles import StaticFiles
 from mission_control.metrics import (
     DiskIoState,
     NetRateState,
+    collect_block_device_detail,
     collect_interface_detail,
     collect_mount_detail,
     collect_process_detail,
@@ -45,6 +46,7 @@ def health() -> dict[str, str]:
 def metrics(
     processes: bool = Query(True),
     proc_limit: int = Query(200, ge=0, le=100_000),
+    disk_io: bool = Query(True),
 ) -> dict:
     global _slow_last
     now = time.time()
@@ -58,6 +60,7 @@ def metrics(
         include_slow=include_slow,
         include_processes=processes,
         process_sample_limit=proc_limit,
+        include_disk_io=disk_io,
     )
     return sample
 
@@ -68,6 +71,17 @@ def mount_detail(mountpoint: str = Query(..., min_length=1)) -> dict:
     data = collect_mount_detail(mountpoint)
     if data is None:
         raise HTTPException(status_code=404, detail="Mount not available")
+    return data
+
+
+@app.get("/api/block/{dev_name}")
+def block_device_detail(dev_name: str) -> dict:
+    """Sysfs + SMART (``smartctl``) for one block device name from diskstats (e.g. ``sda``, ``nvme0n1``)."""
+    if len(dev_name) > 80:
+        raise HTTPException(status_code=404, detail="Block device not found")
+    data = collect_block_device_detail(dev_name)
+    if data is None:
+        raise HTTPException(status_code=404, detail="Block device not found")
     return data
 
 
@@ -116,6 +130,7 @@ def process_detail(pid: int) -> dict:
 async def stream(
     interval: float = Query(1.0, ge=0.25, le=30.0),
     processes: bool = Query(True),
+    disk_io: bool = Query(True),
     proc_limit: int = Query(
         200,
         ge=0,
@@ -126,6 +141,7 @@ async def stream(
     """SSE: live metrics; `interval` is seconds between snapshots (0.25–30).
 
     Set ``processes=false`` to omit top-process collection (empty ``processes`` list).
+    Set ``disk_io=false`` to skip ``/proc/diskstats`` and omit ``disk_io`` in payloads.
     Use ``proc_limit=0`` to include every process in the sample (heavier).
     """
 
@@ -138,6 +154,7 @@ async def stream(
             include_slow=False,
             include_processes=processes,
             process_sample_limit=proc_limit,
+            include_disk_io=disk_io,
         )
         while True:
             now = time.time()
@@ -151,6 +168,7 @@ async def stream(
                 include_slow=include_slow,
                 include_processes=processes,
                 process_sample_limit=proc_limit,
+                include_disk_io=disk_io,
             )
             line = "data: " + json.dumps(snap) + "\n\n"
             yield line.encode("utf-8")

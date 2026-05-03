@@ -1039,6 +1039,19 @@ table.mc-table.mc-table-procs {
   font-size: 0.88em;
 }
 
+.mc-table-disk-io tbody tr.disk-io-row-detail {
+  cursor: pointer;
+}
+
+.mc-table-disk-io tbody tr.disk-io-row-detail:hover {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.mc-table-disk-io tbody tr.disk-io-row-detail:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  outline-offset: -2px;
+}
+
 .mc-table-thermal th.thermal-sortable {
   cursor: pointer;
   user-select: none;
@@ -1097,17 +1110,88 @@ table.mc-table.mc-table-procs {
   text-align: left;
 }
 
-.zfs-pools-block {
+.storage-subsection {
   margin-top: 1.15rem;
 }
 
-.zfs-pools-heading {
+.storage-subsection:first-child {
+  margin-top: 0;
+}
+
+.storage-subheading {
   margin: 0 0 0.5rem;
   font-size: 0.72rem;
   font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--muted);
+}
+
+.block-dev-smart-dd {
+  overflow-x: auto;
+}
+
+.block-dev-smart-msg {
+  white-space: pre-wrap;
+}
+
+.block-dev-smart-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+  margin: 0.35rem 0 0.75rem;
+}
+
+.block-dev-smart-table th {
+  text-align: left;
+  font-weight: 600;
+  padding: 0.2rem 0.75rem 0.2rem 0;
+  vertical-align: top;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.block-dev-smart-table td {
+  padding: 0.2rem 0;
+  word-break: break-word;
+}
+
+.storage-subsection-head {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0 0 0.5rem;
+}
+
+.storage-subsection-head .storage-subheading {
+  margin: 0;
+  flex: 1;
+}
+
+.storage-subsection.is-collapsed .storage-subsection-head {
+  margin-bottom: 0;
+}
+
+.storage-subsection-collapse {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.65rem;
+  height: 1.65rem;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--panel) 88%, var(--border));
+  color: var(--muted);
+  font-size: 0.95rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.storage-subsection-collapse:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  outline-offset: 2px;
 }
 
 .mc-table-zfs .zfs-th-num,

@@ -254,22 +254,33 @@
         <button type="button" class="panel-collapse" aria-expanded="true" aria-controls="panel-body-storage">−</button>
       </div>
       <div class="panel-body" id="panel-body-storage">
-        <div id="disk-table" class="table-wrap"></div>
-        <div id="zfs-pools-block" class="zfs-pools-block" hidden>
-          <h3 class="zfs-pools-heading">ZFS pools</h3>
+        <div class="storage-subsection">
+          <h3 class="storage-subheading" id="storage-mounts-heading">Mounts</h3>
+          <div id="disk-table" class="table-wrap"></div>
+        </div>
+        <div id="zfs-pools-block" class="storage-subsection zfs-pools-block" hidden>
+          <h3 class="storage-subheading" id="storage-zfs-heading">ZFS pools</h3>
           <div id="zfs-pools-table" class="table-wrap"></div>
         </div>
-      </div>
-    </section>
-
-    <section class="panel panel-wide" data-panel-id="disk_io" aria-labelledby="panel-title-disk-io">
-      <div class="panel-head">
-        <button type="button" class="panel-drag" draggable="true" aria-label="Drag to reorder section" title="Drag to reorder">≡</button>
-        <h2 id="panel-title-disk-io" class="panel-title">Disk I/O</h2>
-        <button type="button" class="panel-collapse" aria-expanded="true" aria-controls="panel-body-disk-io">−</button>
-      </div>
-      <div class="panel-body" id="panel-body-disk-io">
-        <div id="disk-io-table" class="table-wrap"></div>
+        <div class="storage-subsection" id="storage-disk-io-subsection">
+          <div class="storage-subsection-head">
+            <h3 class="storage-subheading" id="storage-disk-io-heading">Disk I/O</h3>
+            <button
+              type="button"
+              class="storage-subsection-collapse"
+              id="storage-disk-io-collapse"
+              aria-expanded="true"
+              aria-controls="storage-disk-io-body"
+              aria-label="Collapse Disk I/O"
+              title="Collapse Disk I/O"
+            >
+              −
+            </button>
+          </div>
+          <div id="storage-disk-io-body" class="storage-subsection-body">
+            <div id="disk-io-table" class="table-wrap"></div>
+          </div>
+        </div>
       </div>
     </section>
 
@@ -382,6 +393,23 @@
       <button type="button" id="thermal-detail-close" class="mc-modal-close" aria-label="Close sensor details">×</button>
     </div>
     <div id="thermal-detail-body" class="mc-modal-body"></div>
+  </div>
+
+  <div id="block-dev-detail-backdrop" class="mc-modal-backdrop" hidden aria-hidden="true"></div>
+  <div
+    id="block-dev-detail-dialog"
+    class="mc-modal"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="block-dev-detail-title"
+    hidden
+    aria-hidden="true"
+  >
+    <div class="mc-modal-head">
+      <h2 id="block-dev-detail-title" class="mc-modal-title">Block device</h2>
+      <button type="button" id="block-dev-detail-close" class="mc-modal-close" aria-label="Close device details">×</button>
+    </div>
+    <div id="block-dev-detail-body" class="mc-modal-body"></div>
   </div>
 
   <div id="net-detail-backdrop" class="mc-modal-backdrop" hidden aria-hidden="true"></div>

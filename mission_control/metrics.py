@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import shutil
@@ -937,6 +938,352 @@ def _read_diskstats() -> dict[str, Any]:
     return {"ts": now, "devices": devices}
 
 
+_BLOCK_DEV_OK = re.compile(r"^[a-z0-9][a-z0-9._+-]*$", re.I)
+
+
+def _normalize_block_dev_name(raw: str) -> str | None:
+    s = (raw or "").strip()
+    if not s or len(s) > 80 or "/" in s or s.startswith("-") or ".." in s:
+        return None
+    if not _BLOCK_DEV_OK.match(s):
+        return None
+    return s
+
+
+def _read_int_sysfs(path: Path) -> int | None:
+    try:
+        return int((path.read_text(encoding="utf-8", errors="replace") or "").split()[0])
+    except (OSError, ValueError, IndexError):
+        return None
+
+
+def _parent_disk_for_smart(devname: str) -> str:
+    """Whole-disk name for SMART (partitions query ``lsblk`` pkname)."""
+    try:
+        r = subprocess.run(
+            ["lsblk", "-no", "pkname", f"/dev/{devname}"],
+            capture_output=True,
+            text=True,
+            timeout=4,
+        )
+        lines = [ln.strip() for ln in (r.stdout or "").splitlines() if ln.strip()]
+        pk = lines[0] if lines else ""
+        if pk and _BLOCK_DEV_OK.match(pk):
+            return pk
+    except (OSError, subprocess.TimeoutExpired, IndexError):
+        pass
+    return devname
+
+
+def _collect_sysfs_for_block(devname: str) -> dict[str, Any]:
+    base = Path("/sys/block") / devname
+    if not base.is_dir():
+        return {}
+    out: dict[str, Any] = {}
+    sz = _read_int_sysfs(base / "size")
+    if sz is not None:
+        out["size_sectors"] = sz
+        out["size_bytes"] = sz * 512
+    for rel, key in (
+        ("ro", "read_only"),
+        ("removable", "removable"),
+        ("queue/rotational", "rotational"),
+        ("queue/logical_block_size", "logical_block_size"),
+        ("queue/physical_block_size", "physical_block_size"),
+        ("dev", "dev_maj_min"),
+    ):
+        p = base / rel
+        if p.is_file():
+            try:
+                t = p.read_text(encoding="utf-8", errors="replace").strip()
+                if t:
+                    out[key] = t[:500]
+            except OSError:
+                pass
+    for mf in ("device/model", "device/vendor", "device/serial"):
+        p = base / mf
+        if p.is_file():
+            try:
+                t = p.read_text(encoding="utf-8", errors="replace").strip()
+                if t:
+                    out[mf.replace("/", "_")] = t
+            except OSError:
+                pass
+    part = base / "partition"
+    if part.is_file():
+        out["is_partition"] = True
+        try:
+            out["partition_index"] = int(part.read_text(encoding="utf-8", errors="replace").strip())
+        except ValueError:
+            pass
+    else:
+        out["is_partition"] = False
+    return out
+
+
+def _ata_attributes_excerpt(j: dict[str, Any]) -> str | None:
+    ata = j.get("ata_smart_attributes")
+    if not isinstance(ata, dict):
+        return None
+    table = ata.get("table")
+    if not isinstance(table, list):
+        return None
+    lines: list[str] = []
+    for row in table[:48]:
+        if not isinstance(row, dict):
+            continue
+        rid = row.get("id")
+        name = row.get("name")
+        val = row.get("value")
+        rawv = row.get("raw")
+        if isinstance(rawv, dict):
+            rawv = rawv.get("string") or rawv.get("value")
+        lines.append(f"{rid} {name}: value={val} raw={rawv}")
+    if not lines:
+        return None
+    return "\n".join(lines)
+
+
+def _smart_summary_from_json(j: dict[str, Any]) -> dict[str, Any]:
+    out: dict[str, Any] = {}
+    ss = j.get("smart_status")
+    if isinstance(ss, dict):
+        if "passed" in ss:
+            out["health_passed"] = bool(ss["passed"])
+        nested = ss.get("nvme")
+        if isinstance(nested, dict) and "passed" in nested and out.get("health_passed") is None:
+            out["health_passed"] = bool(nested["passed"])
+    for k in ("model_name", "serial_number", "firmware_version"):
+        v = j.get(k)
+        if v:
+            out[k] = str(v)[:240]
+    t = j.get("temperature")
+    if isinstance(t, dict):
+        cur = t.get("current")
+        if cur is not None:
+            try:
+                out["temperature_c"] = round(float(cur), 1)
+            except (TypeError, ValueError):
+                pass
+    pot = j.get("power_on_time")
+    if isinstance(pot, dict) and pot.get("hours") is not None:
+        try:
+            out["power_on_hours"] = int(pot["hours"])
+        except (TypeError, ValueError):
+            pass
+    nv = j.get("nvme_smart_health_information_log")
+    if isinstance(nv, dict):
+        if nv.get("temperature") is not None:
+            try:
+                out["temperature_c"] = round(float(nv["temperature"]), 1)
+            except (TypeError, ValueError):
+                pass
+        if nv.get("critical_warning") is not None:
+            try:
+                cw = int(nv["critical_warning"])
+                out["nvme_critical_warning"] = cw
+            except (TypeError, ValueError):
+                cw = -1
+            else:
+                if out.get("health_passed") is None:
+                    if cw == 0:
+                        out["health_passed"] = True
+                    elif cw > 0:
+                        out["health_passed"] = False
+        sp = nv.get("smart_status")
+        if isinstance(sp, dict) and "passed" in sp:
+            out["health_passed"] = bool(sp["passed"])
+    uc = j.get("user_capacity")
+    if isinstance(uc, dict) and uc.get("bytes") is not None:
+        try:
+            out["user_capacity_bytes"] = int(uc["bytes"])
+        except (TypeError, ValueError):
+            pass
+    return out
+
+
+def _smartctl_json_messages(j: dict[str, Any]) -> list[str]:
+    sc = j.get("smartctl")
+    if not isinstance(sc, dict):
+        return []
+    msgs = sc.get("messages")
+    if not isinstance(msgs, list):
+        return []
+    out: list[str] = []
+    for m in msgs:
+        if isinstance(m, dict):
+            s = m.get("string")
+            if s:
+                out.append(str(s))
+        elif isinstance(m, str):
+            out.append(m)
+    return out
+
+
+def _json_has_usable_smart_payload(j: dict[str, Any]) -> bool:
+    if j.get("smart_status") is not None:
+        return True
+    if j.get("nvme_smart_health_information_log"):
+        return True
+    if j.get("ata_smart_attributes"):
+        return True
+    if j.get("ata_smart_data"):
+        return True
+    if j.get("scsi_sense"):
+        return True
+    if j.get("model_name"):
+        return True
+    return False
+
+
+def _permission_denied_hint(msgs: list[str]) -> str:
+    joined = " ".join(msgs).lower()
+    if "permission denied" in joined or "operation not permitted" in joined:
+        return (
+            "The server process cannot open raw block devices. Run Mission Control with a user "
+            "that can read /dev/sd* and /dev/nvme* (often root), or add that user to the `disk` "
+            "group and restart the session."
+        )
+    return ""
+
+
+def _run_smartctl(devpath: str | None) -> dict[str, Any]:
+    base: dict[str, Any] = {
+        "smartctl_found": bool(shutil.which("smartctl")),
+        "health_passed": None,
+        "message": None,
+    }
+    if not devpath or not Path(devpath).exists():
+        base["message"] = "No whole-disk device path for SMART (or missing /dev node)."
+        return base
+    smartctl = shutil.which("smartctl")
+    if not smartctl:
+        base["message"] = "smartctl not on PATH (install smartmontools for SMART data)."
+        return base
+
+    json_payload: dict[str, Any] | None = None
+    for args in ([smartctl, "-x", "-j", devpath], [smartctl, "-a", "-j", devpath]):
+        try:
+            proc = subprocess.run(
+                args,
+                capture_output=True,
+                text=True,
+                timeout=18,
+            )
+            raw = (proc.stdout or "").strip()
+            if raw.startswith("{") or raw.startswith("["):
+                try:
+                    parsed = json.loads(raw)
+                    if isinstance(parsed, dict):
+                        json_payload = parsed
+                        break
+                except json.JSONDecodeError:
+                    pass
+        except (OSError, subprocess.TimeoutExpired):
+            continue
+
+    if json_payload:
+        sc_block = json_payload.get("smartctl")
+        if isinstance(sc_block, dict):
+            es = sc_block.get("exit_status")
+            if es is not None:
+                try:
+                    base["exit_status"] = int(es)
+                except (TypeError, ValueError):
+                    pass
+
+        err_msgs = _smartctl_json_messages(json_payload)
+        usable = _json_has_usable_smart_payload(json_payload)
+
+        if err_msgs and not usable:
+            msg = "; ".join(err_msgs)
+            hint = _permission_denied_hint(err_msgs)
+            if hint:
+                msg = f"{msg}\n{hint}"
+            base["message"] = msg[:4000]
+            return base
+
+        base.update(_smart_summary_from_json(json_payload))
+        if err_msgs and base.get("health_passed") is None and not base.get("message"):
+            if isinstance(sc_block, dict) and sc_block.get("exit_status") not in (None, 0, 4):
+                base["message"] = "; ".join(err_msgs)[:2000]
+
+        atx = _ata_attributes_excerpt(json_payload)
+        if atx:
+            base["attributes_excerpt"] = atx[:12_000]
+        return base
+
+    try:
+        proc = subprocess.run(
+            [smartctl, "-i", "-H", "-A", devpath],
+            capture_output=True,
+            text=True,
+            timeout=18,
+        )
+        txt = proc.stdout or ""
+        if proc.stderr:
+            txt += "\n" + proc.stderr
+        if txt.strip():
+            base["raw_excerpt"] = txt.strip()[:12_000]
+            for line in txt.splitlines():
+                lu = line.upper()
+                if (
+                    "SMART OVERALL-HEALTH" in lu
+                    or "SMART HEALTH STATUS" in lu
+                    or "OVERALL-HEALTH SELF-ASSESSMENT" in lu
+                    or "SELF-ASSESSMENT TEST RESULT" in lu
+                    or "SMART OVERALL HEALTH" in lu
+                ):
+                    if "PASSED" in lu:
+                        base["health_passed"] = True
+                    elif "FAILED" in lu:
+                        base["health_passed"] = False
+                    break
+            if base.get("health_passed") is None and (
+                "PERMISSION DENIED" in txt.upper() or "OPERATION NOT PERMITTED" in txt.upper()
+            ):
+                hint = _permission_denied_hint([txt])
+                base["message"] = (txt.strip()[:2500] + (f"\n{hint}" if hint else ""))[:4000]
+        else:
+            err = (proc.stderr or "").strip() or f"exit {proc.returncode}"
+            base["message"] = err[:2000]
+    except OSError:
+        base["message"] = "Could not run smartctl."
+    except subprocess.TimeoutExpired:
+        base["message"] = "smartctl timed out."
+    return base
+
+
+def collect_block_device_detail(devname: str) -> dict[str, Any] | None:
+    """Sysfs fields, optional diskstats counters, and SMART via ``smartctl`` when available."""
+    name = _normalize_block_dev_name(devname)
+    if not name:
+        return None
+    sys_p = Path("/sys/block") / name
+    if not sys_p.is_dir():
+        return None
+    devpath = f"/dev/{name}"
+    devpath_ok = Path(devpath).exists()
+    smart_name = _parent_disk_for_smart(name)
+    smart_path = f"/dev/{smart_name}"
+    if not Path(smart_path).exists():
+        smart_path = devpath if devpath_ok else None
+
+    ds = _read_diskstats()
+    dev_snap = (ds.get("devices") or {}).get(name)
+
+    return {
+        "devname": name,
+        "devpath": devpath if devpath_ok else None,
+        "smart_target_devname": smart_name,
+        "smart_devpath": smart_path,
+        "ts": time.time(),
+        "sysfs": _collect_sysfs_for_block(name),
+        "diskstats": dev_snap,
+        "smart": _run_smartctl(smart_path),
+    }
+
+
 def _hwmon_detail_key(chip: str, label: str) -> str | None:
     """Map psutil chip + label to ``hwmon:hwmonN:tempM`` for sysfs detail lookup."""
     chip_s = (chip or "").strip()
@@ -1155,6 +1502,7 @@ def collect_snapshot(
     include_slow: bool = False,
     include_processes: bool = True,
     process_sample_limit: int = 200,
+    include_disk_io: bool = True,
 ) -> dict[str, Any]:
     """Build one metrics snapshot. cpu_sample_interval None = non-blocking (may be 0 first call)."""
     vm = psutil.virtual_memory()
@@ -1164,8 +1512,13 @@ def collect_snapshot(
 
     net_raw = _net_io()
     net = net_state.with_rates(net_raw)
-    disk_raw = _read_diskstats()
-    disk_io = disk_io_state.with_rates(disk_raw)
+    if include_disk_io:
+        disk_raw = _read_diskstats()
+        disk_io = disk_io_state.with_rates(disk_raw)
+    else:
+        disk_io_state.last = None
+        disk_io_state.last_rates = {}
+        disk_io = None
 
     data: dict[str, Any] = {
         "ts": time.time(),
