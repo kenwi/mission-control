@@ -303,6 +303,27 @@ html, body {
   height: 1rem;
 }
 
+input.mc-settings-text {
+  font-family: var(--font-sans);
+  font-size: 0.84rem;
+  padding: 0.45rem 0.55rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--text);
+  box-sizing: border-box;
+}
+
+input.mc-settings-text::placeholder {
+  color: var(--muted);
+  opacity: 0.85;
+}
+
+input.mc-settings-text:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  outline-offset: 2px;
+}
+
 .mc-theme-select {
   font-family: var(--font-mono);
   font-size: 0.75rem;
@@ -349,6 +370,12 @@ html, body {
 .pill-warn {
   color: var(--warn);
   border-color: color-mix(in srgb, var(--warn) 35%, transparent);
+}
+
+.pill-paused {
+  color: var(--muted);
+  border-color: color-mix(in srgb, var(--muted) 45%, var(--border));
+  text-transform: uppercase;
 }
 
 .pill-crit {

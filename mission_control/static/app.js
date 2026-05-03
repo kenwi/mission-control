@@ -172,6 +172,101 @@ function initPanelVisibilityControls() {
   applyPanelVisibility();
 }
 
+const HEADER_TITLE_KEY = "mc-header-title";
+const HEADER_TITLE_VISIBLE_KEY = "mc-header-title-visible";
+const STREAM_PAUSED_KEY = "mc-stream-paused";
+
+function effectiveHeaderTitle(raw) {
+  const t = String(raw ?? "").trim();
+  return t.length ? t.slice(0, 80) : "Mission Control";
+}
+
+function loadHeaderTitleText() {
+  try {
+    const t = localStorage.getItem(HEADER_TITLE_KEY);
+    if (t != null && String(t).trim() !== "") return String(t).trim().slice(0, 80);
+  } catch (_) {
+    /* ignore */
+  }
+  return "Mission Control";
+}
+
+function loadHeaderTitleVisible() {
+  try {
+    return localStorage.getItem(HEADER_TITLE_VISIBLE_KEY) !== "0";
+  } catch (_) {
+    return true;
+  }
+}
+
+function loadStreamPaused() {
+  try {
+    return localStorage.getItem(STREAM_PAUSED_KEY) === "1";
+  } catch (_) {
+    return false;
+  }
+}
+
+function saveStreamPaused(on) {
+  try {
+    localStorage.setItem(STREAM_PAUSED_KEY, on ? "1" : "0");
+  } catch (_) {
+    /* ignore */
+  }
+}
+
+function applyHeaderTitleToDom() {
+  const input = document.getElementById("header-title-input");
+  const visChk = document.getElementById("header-title-visible");
+  const span = document.getElementById("header-title-text");
+  const title = input ? effectiveHeaderTitle(input.value) : loadHeaderTitleText();
+  const visible = visChk ? visChk.checked : loadHeaderTitleVisible();
+  if (span) {
+    span.textContent = title;
+    span.hidden = !visible;
+  }
+  document.title = title;
+}
+
+function initHeaderPrefs() {
+  const input = document.getElementById("header-title-input");
+  const vis = document.getElementById("header-title-visible");
+  if (input) {
+    input.value = loadHeaderTitleText();
+    const debouncedSaveTitle = debounce(() => {
+      try {
+        localStorage.setItem(HEADER_TITLE_KEY, effectiveHeaderTitle(input.value));
+      } catch (_) {
+        /* ignore */
+      }
+    }, 400);
+    input.addEventListener("input", () => {
+      applyHeaderTitleToDom();
+      debouncedSaveTitle();
+    });
+    input.addEventListener("change", () => {
+      try {
+        localStorage.setItem(HEADER_TITLE_KEY, effectiveHeaderTitle(input.value));
+      } catch (_) {
+        /* ignore */
+      }
+      applyHeaderTitleToDom();
+    });
+  }
+  if (vis) {
+    vis.checked = loadHeaderTitleVisible();
+    vis.addEventListener("change", () => {
+      try {
+        localStorage.setItem(HEADER_TITLE_VISIBLE_KEY, vis.checked ? "1" : "0");
+      } catch (_) {
+        /* ignore */
+      }
+      applyHeaderTitleToDom();
+    });
+  }
+  applyHeaderTitleToDom();
+}
+
 const UPDATE_INTERVAL_KEY = "mc-update-interval";
 const STREAM_INTERVAL_OPTIONS = [0.25, 0.5, 1, 2, 5, 10];
 
@@ -205,6 +300,14 @@ function connectMetricsStream() {
     metricsEventSource.close();
     metricsEventSource = null;
   }
+  if (loadStreamPaused()) {
+    const pill = document.getElementById("conn-pill");
+    if (pill) {
+      pill.textContent = "paused";
+      pill.className = "pill pill-paused";
+    }
+    return;
+  }
   const sec = loadUpdateInterval();
   const u = `/api/stream?interval=${encodeURIComponent(String(sec))}`;
   metricsEventSource = new EventSource(u);
@@ -217,7 +320,7 @@ function connectMetricsStream() {
   };
   metricsEventSource.onerror = () => {
     const pill = document.getElementById("conn-pill");
-    if (pill) {
+    if (pill && !loadStreamPaused()) {
       pill.textContent = "reconnecting…";
       pill.className = "pill pill-warn";
     }
@@ -225,20 +328,29 @@ function connectMetricsStream() {
 }
 
 function initUpdateIntervalControl() {
+  const pauseChk = document.getElementById("stream-pause");
+  if (pauseChk) {
+    pauseChk.checked = loadStreamPaused();
+    pauseChk.addEventListener("change", () => {
+      saveStreamPaused(pauseChk.checked);
+      connectMetricsStream();
+    });
+  }
   const sel = document.getElementById("update-interval-select");
-  if (!sel) return;
-  sel.value = String(loadUpdateInterval());
-  sel.addEventListener("change", () => {
-    const v = parseFloat(sel.value);
-    if (!Number.isFinite(v)) return;
-    try {
-      localStorage.setItem(UPDATE_INTERVAL_KEY, String(snapStreamInterval(v)));
-    } catch (_) {
-      /* ignore */
-    }
+  if (sel) {
     sel.value = String(loadUpdateInterval());
-    connectMetricsStream();
-  });
+    sel.addEventListener("change", () => {
+      const v = parseFloat(sel.value);
+      if (!Number.isFinite(v)) return;
+      try {
+        localStorage.setItem(UPDATE_INTERVAL_KEY, String(snapStreamInterval(v)));
+      } catch (_) {
+        /* ignore */
+      }
+      sel.value = String(loadUpdateInterval());
+      connectMetricsStream();
+    });
+  }
   connectMetricsStream();
 }
 
@@ -1059,7 +1171,7 @@ function initAptPackagesToggle() {
 
 function applySnapshot(data) {
   const pill = document.getElementById("conn-pill");
-  if (pill) {
+  if (pill && !loadStreamPaused()) {
     pill.textContent = "live";
     pill.className = "pill pill-ok";
   }
@@ -1171,6 +1283,7 @@ function tickClock() {
 }
 
 initTheme();
+initHeaderPrefs();
 initClockFormatControl();
 initProcMemUnitControl();
 initSettingsDrawer();

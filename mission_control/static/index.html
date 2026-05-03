@@ -18,7 +18,7 @@
 <body>
   <header class="mc-header">
     <div class="mc-brand">
-      <span class="mc-title">Mission Control</span>
+      <span id="header-title-text" class="mc-title">Mission Control</span>
       <span id="host-line" class="mc-sub">—</span>
     </div>
     <div class="mc-status">
@@ -35,6 +35,16 @@
       <button type="button" id="settings-close" class="mc-drawer-close" aria-label="Close settings">×</button>
     </div>
     <div class="mc-drawer-body">
+      <div class="mc-settings-field">
+        <label for="header-title-input" class="mc-settings-label">Header title</label>
+        <input type="text" id="header-title-input" class="mc-settings-text mc-settings-control" maxlength="80" autocomplete="off" spellcheck="false" placeholder="Mission Control" aria-label="Main header title" />
+      </div>
+      <div class="mc-settings-field">
+        <label class="mc-settings-check">
+          <input type="checkbox" id="header-title-visible" checked />
+          <span>Show header title</span>
+        </label>
+      </div>
       <div class="mc-settings-field">
         <label for="theme-select" class="mc-settings-label">Theme</label>
         <select id="theme-select" class="mc-theme-select mc-settings-control" aria-label="Color theme"></select>
@@ -75,6 +85,12 @@
           <option value="5">5 s</option>
           <option value="10">10 s</option>
         </select>
+      </div>
+      <div class="mc-settings-field">
+        <label class="mc-settings-check">
+          <input type="checkbox" id="stream-pause" />
+          <span>Pause live updates</span>
+        </label>
       </div>
     </div>
   </aside>
