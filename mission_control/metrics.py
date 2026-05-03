@@ -106,8 +106,9 @@ def _top_processes(limit: int = 12) -> list[dict[str, Any]]:
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             continue
     scored.sort(key=lambda t: (t[0] + t[1] * 2), reverse=True)
+    take = scored if limit <= 0 else scored[:limit]
     out: list[dict[str, Any]] = []
-    for cpu, mem, p in scored[:limit]:
+    for cpu, mem, p in take:
         try:
             with p.oneshot():
                 name = p.name()
@@ -416,6 +417,7 @@ def collect_snapshot(
     *,
     include_slow: bool = False,
     include_processes: bool = True,
+    process_sample_limit: int = 200,
 ) -> dict[str, Any]:
     """Build one metrics snapshot. cpu_sample_interval None = non-blocking (may be 0 first call)."""
     vm = psutil.virtual_memory()
@@ -449,7 +451,7 @@ def collect_snapshot(
         },
         "disk": _disk_mounts(),
         "network": net,
-        "processes": _top_processes(200) if include_processes else [],
+        "processes": _top_processes(process_sample_limit) if include_processes else [],
     }
 
     if include_slow:

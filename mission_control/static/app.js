@@ -362,6 +362,15 @@ function streamIncludeProcesses() {
   return true;
 }
 
+/** Max processes to pull from the server on each snapshot (0 = full machine scan). */
+function streamProcSampleLimit() {
+  const el = document.getElementById("proc-limit");
+  if (!el || el.value === "" || el.value == null) return 200;
+  const n = parseInt(el.value, 10);
+  if (!Number.isFinite(n) || n < 0) return 200;
+  return n;
+}
+
 function connectMetricsStream() {
   if (metricsEventSource) {
     metricsEventSource.close();
@@ -377,7 +386,8 @@ function connectMetricsStream() {
   }
   const sec = loadUpdateInterval();
   const procs = streamIncludeProcesses();
-  const u = `/api/stream?interval=${encodeURIComponent(String(sec))}&processes=${procs}`;
+  const procLimit = streamProcSampleLimit();
+  const u = `/api/stream?interval=${encodeURIComponent(String(sec))}&processes=${procs}&proc_limit=${encodeURIComponent(String(procLimit))}`;
   metricsEventSource = new EventSource(u);
   metricsEventSource.onmessage = (ev) => {
     try {
@@ -1408,8 +1418,9 @@ function renderProcsTable() {
 
   const q = (searchEl && searchEl.value ? searchEl.value : "").trim().toLowerCase();
   let limit = parseInt(limitEl && limitEl.value ? limitEl.value : "12", 10);
-  if (!Number.isFinite(limit) || limit < 1) limit = 12;
-  limit = Math.min(500, limit);
+  if (!Number.isFinite(limit) || limit < 0) limit = 12;
+  const showAllRows = limit === 0;
+  if (!showAllRows) limit = Math.min(100_000, limit);
 
   const raw = lastProcesses || [];
   if (!raw.length) {
@@ -1440,7 +1451,7 @@ function renderProcsTable() {
   list.sort(cmpProcRows);
 
   const totalMatching = list.length;
-  const shown = list.slice(0, limit);
+  const shown = showAllRows ? list : list.slice(0, limit);
 
   const meta =
     totalMatching === 0 && q
@@ -1536,6 +1547,7 @@ function initProcessControls() {
   limit?.addEventListener("change", () => {
     saveProcPrefs();
     renderProcsTable();
+    connectMetricsStream();
   });
   initProcessTableRowClicks();
   renderProcsTable();

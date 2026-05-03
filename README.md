@@ -59,7 +59,7 @@ Preferences live in the browser’s **localStorage**. A full export includes key
 
 ### Top processes
 
-Filter by name, limit row count, and sort by column header (**PID**, **Name**, **CPU**, **MEM**). **CPU** defaults to each process’s share of **all logical CPUs** (aligned with the Compute tile). Options can switch the column to **per logical CPU** (where **100%** is one core and multi-core work can exceed **100%**); the cell tooltip always shows the complementary value. Memory sorting follows the configured display (percent vs RSS). Optionally show a **footer row** with the **sum of RSS** for the processes currently listed (toggle in Options). **Click a row** (or focus it and press **Enter** or **Space**) to open a dialog with extended process information (fetched on demand from `/api/process/{pid}`).
+Filter by name, choose how many rows to show (**10–200** or **All** for the full sampled list from the server), and sort by column header (**PID**, **Name**, **CPU**, **MEM**). **CPU** defaults to each process’s share of **all logical CPUs** (aligned with the Compute tile). Options can switch the column to **per logical CPU** (where **100%** is one core and multi-core work can exceed **100%**); the cell tooltip always shows the complementary value. Memory sorting follows the configured display (percent vs RSS). Optionally show a **footer row** with the **sum of RSS** for the processes currently listed (toggle in Options). **Click a row** (or focus it and press **Enter** or **Space**) to open a dialog with extended process information (fetched on demand from `/api/process/{pid}`).
 
 ### Operations
 
@@ -72,8 +72,8 @@ When upgrades exist, expand the APT summary to list packages with **installed an
 | `GET` | `/` | Dashboard HTML |
 | `GET` | `/assets/…` | Static assets |
 | `GET` | `/api/health` | `{"status":"ok"}` |
-| `GET` | `/api/metrics` | Single JSON snapshot (same shape as SSE payloads) |
-| `GET` | `/api/stream?interval=1` | SSE stream; `interval` in seconds, **0.25 to 30** inclusive |
+| `GET` | `/api/metrics` | Single JSON snapshot (`processes` and `proc_limit` query params; `proc_limit=0` = all processes in the sample) |
+| `GET` | `/api/stream` | SSE stream; `interval` (**0.25–30** s), `processes` (bool), `proc_limit` (default **200**; **0** = full process list each tick) |
 | `GET` | `/api/process/{pid}` | Process detail for a live PID (JSON); **404** if the process is gone |
 
 ## Project layout
