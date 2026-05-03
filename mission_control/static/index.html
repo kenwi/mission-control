@@ -176,8 +176,15 @@
     <section class="panel panel-wide" data-panel-id="compute" aria-labelledby="panel-title-compute">
       <div class="panel-head">
         <button type="button" class="panel-drag" draggable="true" aria-label="Drag to reorder section" title="Drag to reorder">≡</button>
-        <h2 id="panel-title-compute" class="panel-title">Compute</h2>
-        <button type="button" class="panel-collapse" aria-expanded="true" aria-controls="panel-body-compute">−</button>
+        <h2
+          id="panel-title-compute"
+          class="panel-title"
+          role="button"
+          tabindex="0"
+          aria-expanded="true"
+          aria-controls="panel-body-compute"
+          aria-label="Collapse Compute"
+        >Compute</h2>
       </div>
       <div class="panel-body" id="panel-body-compute">
         <div class="tiles">
@@ -211,43 +218,42 @@
     <section class="panel panel-wide" data-panel-id="thermal" aria-labelledby="panel-title-thermal">
       <div class="panel-head">
         <button type="button" class="panel-drag" draggable="true" aria-label="Drag to reorder section" title="Drag to reorder">≡</button>
-        <h2 id="panel-title-thermal" class="panel-title">Thermal</h2>
-        <button type="button" class="panel-collapse" aria-expanded="true" aria-controls="panel-body-thermal">−</button>
+        <h2
+          id="panel-title-thermal"
+          class="panel-title"
+          role="button"
+          tabindex="0"
+          aria-expanded="true"
+          aria-controls="panel-body-thermal"
+          aria-label="Collapse Thermal"
+        >Thermal</h2>
       </div>
       <div class="panel-body" id="panel-body-thermal">
         <div class="storage-subsection" id="thermal-sensors-subsection">
-          <div class="storage-subsection-head">
+          <div
+            class="storage-subsection-head"
+            role="button"
+            tabindex="0"
+            aria-expanded="true"
+            aria-controls="thermal-sensors-body"
+            aria-label="Collapse Sensors"
+          >
             <h3 class="storage-subheading" id="thermal-sensors-heading">Sensors</h3>
-            <button
-              type="button"
-              class="storage-subsection-collapse"
-              id="thermal-sensors-collapse"
-              aria-expanded="true"
-              aria-controls="thermal-sensors-body"
-              aria-label="Collapse Sensors"
-              title="Collapse Sensors"
-            >
-              −
-            </button>
           </div>
           <div id="thermal-sensors-body" class="storage-subsection-body">
             <div id="thermal-table" class="table-wrap"></div>
           </div>
         </div>
         <div class="storage-subsection" id="thermal-fans-subsection">
-          <div class="storage-subsection-head">
+          <div
+            class="storage-subsection-head"
+            role="button"
+            tabindex="0"
+            aria-expanded="true"
+            aria-controls="thermal-fans-body"
+            aria-label="Collapse Fans"
+          >
             <h3 class="storage-subheading" id="thermal-fans-heading">Fans</h3>
-            <button
-              type="button"
-              class="storage-subsection-collapse"
-              id="thermal-fans-collapse"
-              aria-expanded="true"
-              aria-controls="thermal-fans-body"
-              aria-label="Collapse Fans"
-              title="Collapse Fans"
-            >
-              −
-            </button>
           </div>
           <div id="thermal-fans-body" class="storage-subsection-body">
             <div id="thermal-fans-table" class="table-wrap"></div>
@@ -259,8 +265,15 @@
     <section class="panel panel-wide" data-panel-id="operations" aria-labelledby="panel-title-operations">
       <div class="panel-head">
         <button type="button" class="panel-drag" draggable="true" aria-label="Drag to reorder section" title="Drag to reorder">≡</button>
-        <h2 id="panel-title-operations" class="panel-title">Operations</h2>
-        <button type="button" class="panel-collapse" aria-expanded="true" aria-controls="panel-body-operations">−</button>
+        <h2
+          id="panel-title-operations"
+          class="panel-title"
+          role="button"
+          tabindex="0"
+          aria-expanded="true"
+          aria-controls="panel-body-operations"
+          aria-label="Collapse Operations"
+        >Operations</h2>
       </div>
       <div class="panel-body" id="panel-body-operations">
         <div id="ops-block" class="ops">
@@ -287,62 +300,57 @@
     <section class="panel panel-wide" data-panel-id="storage" aria-labelledby="panel-title-storage">
       <div class="panel-head">
         <button type="button" class="panel-drag" draggable="true" aria-label="Drag to reorder section" title="Drag to reorder">≡</button>
-        <h2 id="panel-title-storage" class="panel-title">Storage</h2>
-        <button type="button" class="panel-collapse" aria-expanded="true" aria-controls="panel-body-storage">−</button>
+        <h2
+          id="panel-title-storage"
+          class="panel-title"
+          role="button"
+          tabindex="0"
+          aria-expanded="true"
+          aria-controls="panel-body-storage"
+          aria-label="Collapse Storage"
+        >Storage</h2>
       </div>
       <div class="panel-body" id="panel-body-storage">
         <div class="storage-subsection" id="storage-mounts-subsection">
-          <div class="storage-subsection-head">
+          <div
+            class="storage-subsection-head"
+            role="button"
+            tabindex="0"
+            aria-expanded="true"
+            aria-controls="storage-mounts-body"
+            aria-label="Collapse Mounts"
+          >
             <h3 class="storage-subheading" id="storage-mounts-heading">Mounts</h3>
-            <button
-              type="button"
-              class="storage-subsection-collapse"
-              id="storage-mounts-collapse"
-              aria-expanded="true"
-              aria-controls="storage-mounts-body"
-              aria-label="Collapse Mounts"
-              title="Collapse Mounts"
-            >
-              −
-            </button>
           </div>
           <div id="storage-mounts-body" class="storage-subsection-body">
             <div id="disk-table" class="table-wrap"></div>
           </div>
         </div>
         <div id="zfs-pools-block" class="storage-subsection zfs-pools-block" hidden>
-          <div class="storage-subsection-head">
+          <div
+            class="storage-subsection-head"
+            role="button"
+            tabindex="0"
+            aria-expanded="true"
+            aria-controls="storage-zfs-body"
+            aria-label="Collapse ZFS pools"
+          >
             <h3 class="storage-subheading" id="storage-zfs-heading">ZFS pools</h3>
-            <button
-              type="button"
-              class="storage-subsection-collapse"
-              id="storage-zfs-collapse"
-              aria-expanded="true"
-              aria-controls="storage-zfs-body"
-              aria-label="Collapse ZFS pools"
-              title="Collapse ZFS pools"
-            >
-              −
-            </button>
           </div>
           <div id="storage-zfs-body" class="storage-subsection-body">
             <div id="zfs-pools-table" class="table-wrap"></div>
           </div>
         </div>
         <div class="storage-subsection" id="storage-disk-io-subsection">
-          <div class="storage-subsection-head">
+          <div
+            class="storage-subsection-head"
+            role="button"
+            tabindex="0"
+            aria-expanded="true"
+            aria-controls="storage-disk-io-body"
+            aria-label="Collapse Disk I/O"
+          >
             <h3 class="storage-subheading" id="storage-disk-io-heading">Disk I/O</h3>
-            <button
-              type="button"
-              class="storage-subsection-collapse"
-              id="storage-disk-io-collapse"
-              aria-expanded="true"
-              aria-controls="storage-disk-io-body"
-              aria-label="Collapse Disk I/O"
-              title="Collapse Disk I/O"
-            >
-              −
-            </button>
           </div>
           <div id="storage-disk-io-body" class="storage-subsection-body">
             <div id="disk-io-table" class="table-wrap"></div>
@@ -354,24 +362,27 @@
     <section class="panel panel-wide" data-panel-id="network" aria-labelledby="panel-title-network">
       <div class="panel-head">
         <button type="button" class="panel-drag" draggable="true" aria-label="Drag to reorder section" title="Drag to reorder">≡</button>
-        <h2 id="panel-title-network" class="panel-title">Network</h2>
-        <button type="button" class="panel-collapse" aria-expanded="true" aria-controls="panel-body-network">−</button>
+        <h2
+          id="panel-title-network"
+          class="panel-title"
+          role="button"
+          tabindex="0"
+          aria-expanded="true"
+          aria-controls="panel-body-network"
+          aria-label="Collapse Network"
+        >Network</h2>
       </div>
       <div class="panel-body" id="panel-body-network">
         <div class="storage-subsection" id="net-interfaces-subsection">
-          <div class="storage-subsection-head">
+          <div
+            class="storage-subsection-head"
+            role="button"
+            tabindex="0"
+            aria-expanded="true"
+            aria-controls="net-interfaces-body"
+            aria-label="Collapse Interfaces"
+          >
             <h3 class="storage-subheading" id="net-interfaces-heading">Interfaces</h3>
-            <button
-              type="button"
-              class="storage-subsection-collapse"
-              id="net-interfaces-collapse"
-              aria-expanded="true"
-              aria-controls="net-interfaces-body"
-              aria-label="Collapse Interfaces"
-              title="Collapse Interfaces"
-            >
-              −
-            </button>
           </div>
           <div id="net-interfaces-body" class="storage-subsection-body">
             <div id="net-table" class="table-wrap"></div>
@@ -383,8 +394,15 @@
     <section class="panel panel-wide" data-panel-id="processes" aria-labelledby="panel-title-processes">
       <div class="panel-head">
         <button type="button" class="panel-drag" draggable="true" aria-label="Drag to reorder section" title="Drag to reorder">≡</button>
-        <h2 id="panel-title-processes" class="panel-title">Top processes</h2>
-        <button type="button" class="panel-collapse" aria-expanded="true" aria-controls="panel-body-processes">−</button>
+        <h2
+          id="panel-title-processes"
+          class="panel-title"
+          role="button"
+          tabindex="0"
+          aria-expanded="true"
+          aria-controls="panel-body-processes"
+          aria-label="Collapse Top processes"
+        >Top processes</h2>
       </div>
       <div class="panel-body" id="panel-body-processes">
         <div class="proc-toolbar">

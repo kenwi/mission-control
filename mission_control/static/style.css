@@ -557,14 +557,21 @@ main.mc-grid {
   letter-spacing: 0.12em;
   text-transform: uppercase;
   color: var(--muted);
+  cursor: pointer;
+  user-select: none;
+}
+
+.panel-head .panel-title:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  outline-offset: 2px;
+  border-radius: 4px;
 }
 
 .panel.is-collapsed .panel-head {
   margin-bottom: 0;
 }
 
-.panel-drag,
-.panel-collapse {
+.panel-drag {
   flex-shrink: 0;
   display: flex;
   align-items: center;
@@ -576,15 +583,10 @@ main.mc-grid {
   border-radius: 6px;
   background: color-mix(in srgb, var(--panel) 88%, var(--border));
   color: var(--muted);
-  font-size: 1rem;
-  line-height: 1;
-  cursor: pointer;
-}
-
-.panel-drag {
-  cursor: grab;
   font-size: 1.1rem;
+  line-height: 1;
   letter-spacing: 0;
+  cursor: grab;
   user-select: none;
 }
 
@@ -592,8 +594,7 @@ main.mc-grid {
   cursor: grabbing;
 }
 
-.panel-drag:focus-visible,
-.panel-collapse:focus-visible {
+.panel-drag:focus-visible {
   outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
   outline-offset: 2px;
 }
@@ -1186,26 +1187,10 @@ table.mc-table.mc-table-procs {
   margin-bottom: 0;
 }
 
-.storage-subsection-collapse {
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 1.65rem;
-  height: 1.65rem;
-  padding: 0;
-  border: 1px solid var(--border);
-  border-radius: 5px;
-  background: color-mix(in srgb, var(--panel) 88%, var(--border));
-  color: var(--muted);
-  font-size: 0.95rem;
-  line-height: 1;
-  cursor: pointer;
-}
-
-.storage-subsection-collapse:focus-visible {
+.storage-subsection-head:focus-visible {
   outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
   outline-offset: 2px;
+  border-radius: 5px;
 }
 
 .mc-table-zfs .zfs-th-num,

@@ -732,11 +732,16 @@ function refreshAllSettingsFromStorage() {
   loadDiskIoSortKeyDir();
   loadThermalSortKeyDir();
   applyStorageDiskIoCollapsed();
-  applyThermalSensorsCollapsed();
+  applySubsectionCollapsed(
+    THERMAL_SENSORS_COLLAPSED_KEY,
+    "thermal-sensors-subsection",
+    "thermal-sensors-body",
+    "Expand Sensors",
+    "Collapse Sensors"
+  );
   applySubsectionCollapsed(
     THERMAL_FANS_COLLAPSED_KEY,
     "thermal-fans-subsection",
-    "thermal-fans-collapse",
     "thermal-fans-body",
     "Expand Fans",
     "Collapse Fans"
@@ -744,7 +749,6 @@ function refreshAllSettingsFromStorage() {
   applySubsectionCollapsed(
     NETWORK_INTERFACES_COLLAPSED_KEY,
     "net-interfaces-subsection",
-    "net-interfaces-collapse",
     "net-interfaces-body",
     "Expand Interfaces",
     "Collapse Interfaces"
@@ -752,7 +756,6 @@ function refreshAllSettingsFromStorage() {
   applySubsectionCollapsed(
     STORAGE_MOUNTS_COLLAPSED_KEY,
     "storage-mounts-subsection",
-    "storage-mounts-collapse",
     "storage-mounts-body",
     "Expand Mounts",
     "Collapse Mounts"
@@ -760,7 +763,6 @@ function refreshAllSettingsFromStorage() {
   applySubsectionCollapsed(
     STORAGE_ZFS_COLLAPSED_KEY,
     "zfs-pools-block",
-    "storage-zfs-collapse",
     "storage-zfs-body",
     "Expand ZFS pools",
     "Collapse ZFS pools"
@@ -908,17 +910,18 @@ function getDragAfterElement(container, y) {
   return closest.element;
 }
 
-function syncCollapseButton(section) {
-  const btn = section.querySelector(".panel-collapse");
+function syncPanelCollapsedUi(section) {
+  const titleEl = section.querySelector(".panel-title");
   const body = section.querySelector(".panel-body");
-  const titleEl = section.querySelector(".panel-head h2");
-  const title = titleEl ? titleEl.textContent.trim() : "section";
+  const name = titleEl ? titleEl.textContent.trim() : "section";
   const collapsed = section.classList.contains("is-collapsed");
-  if (body) body.hidden = collapsed;
-  if (btn) {
-    btn.setAttribute("aria-expanded", String(!collapsed));
-    btn.textContent = collapsed ? "+" : "−";
-    btn.setAttribute("aria-label", collapsed ? `Expand ${title}` : `Collapse ${title}`);
+  if (body) {
+    body.hidden = collapsed;
+    body.setAttribute("aria-hidden", String(collapsed));
+  }
+  if (titleEl) {
+    titleEl.setAttribute("aria-expanded", String(!collapsed));
+    titleEl.setAttribute("aria-label", collapsed ? `Expand ${name}` : `Collapse ${name}`);
   }
 }
 
@@ -932,7 +935,7 @@ function loadPanelCollapsed() {
   document.querySelectorAll("section.panel[data-panel-id]").forEach((section) => {
     const id = section.dataset.panelId;
     section.classList.toggle("is-collapsed", !!(id && map[id]));
-    syncCollapseButton(section);
+    syncPanelCollapsedUi(section);
   });
 }
 
@@ -952,7 +955,7 @@ function togglePanelCollapse(section) {
   } catch (_) {
     /* ignore */
   }
-  syncCollapseButton(section);
+  syncPanelCollapsedUi(section);
   if (id === "processes" || id === "storage") connectMetricsStream();
 }
 
@@ -965,7 +968,7 @@ function initPanelLayout() {
 
   main.querySelectorAll("section.panel[data-panel-id]").forEach((section) => {
     const handle = section.querySelector(".panel-drag");
-    const collapseBtn = section.querySelector(".panel-collapse");
+    const panelTitle = section.querySelector(".panel-title");
     const panelId = section.dataset.panelId;
 
     if (handle) {
@@ -979,8 +982,19 @@ function initPanelLayout() {
       });
     }
 
-    if (collapseBtn) {
-      collapseBtn.addEventListener("click", () => togglePanelCollapse(section));
+    if (panelTitle && panelTitle.dataset.panelCollapseBound !== "1") {
+      panelTitle.dataset.panelCollapseBound = "1";
+      const body = section.querySelector(".panel-body");
+      if (body && body.id) {
+        panelTitle.setAttribute("aria-controls", body.id);
+      }
+      const onToggle = () => togglePanelCollapse(section);
+      panelTitle.addEventListener("click", onToggle);
+      panelTitle.addEventListener("keydown", (e) => {
+        if (e.key !== "Enter" && e.key !== " ") return;
+        e.preventDefault();
+        onToggle();
+      });
     }
   });
 
@@ -1260,59 +1274,6 @@ function initDiskRowClicks() {
   });
 }
 
-function loadStorageDiskIoCollapsed() {
-  try {
-    return localStorage.getItem(STORAGE_DISK_IO_COLLAPSED_KEY) === "1";
-  } catch (_) {
-    return false;
-  }
-}
-
-function saveStorageDiskIoCollapsed(on) {
-  try {
-    localStorage.setItem(STORAGE_DISK_IO_COLLAPSED_KEY, on ? "1" : "0");
-  } catch (_) {
-    /* ignore */
-  }
-}
-
-function syncStorageDiskIoCollapseUi(subsection, btn) {
-  const body = document.getElementById("storage-disk-io-body");
-  const collapsed = subsection.classList.contains("is-collapsed");
-  if (btn) {
-    btn.setAttribute("aria-expanded", String(!collapsed));
-    btn.textContent = collapsed ? "+" : "−";
-    btn.setAttribute("aria-label", collapsed ? "Expand Disk I/O" : "Collapse Disk I/O");
-    btn.setAttribute("title", collapsed ? "Expand Disk I/O" : "Collapse Disk I/O");
-  }
-  if (body) {
-    body.hidden = collapsed;
-    body.setAttribute("aria-hidden", String(collapsed));
-  }
-}
-
-function applyStorageDiskIoCollapsed() {
-  const subsection = document.getElementById("storage-disk-io-subsection");
-  const btn = document.getElementById("storage-disk-io-collapse");
-  if (!subsection || !btn) return;
-  subsection.classList.toggle("is-collapsed", loadStorageDiskIoCollapsed());
-  syncStorageDiskIoCollapseUi(subsection, btn);
-}
-
-function initStorageDiskIoSubsectionCollapse() {
-  const subsection = document.getElementById("storage-disk-io-subsection");
-  const btn = document.getElementById("storage-disk-io-collapse");
-  if (!subsection || !btn || btn.dataset.diskIoSubCollapseBound === "1") return;
-  btn.dataset.diskIoSubCollapseBound = "1";
-  btn.addEventListener("click", () => {
-    const collapsed = !subsection.classList.contains("is-collapsed");
-    subsection.classList.toggle("is-collapsed", collapsed);
-    saveStorageDiskIoCollapsed(collapsed);
-    syncStorageDiskIoCollapseUi(subsection, btn);
-    connectMetricsStream();
-  });
-}
-
 function loadSubsectionCollapsed(key) {
   try {
     return localStorage.getItem(key) === "1";
@@ -1329,54 +1290,65 @@ function saveSubsectionCollapsed(key, on) {
   }
 }
 
-function applySubsectionCollapsed(key, subsectionId, btnId, bodyId, expandLabel, collapseLabel) {
+function applySubsectionCollapsed(key, subsectionId, bodyId, expandLabel, collapseLabel) {
   const subsection = document.getElementById(subsectionId);
-  const btn = document.getElementById(btnId);
   const body = document.getElementById(bodyId);
-  if (!subsection || !btn || !body) return;
+  const head = subsection?.querySelector(".storage-subsection-head");
+  if (!subsection || !body || !head) return;
   subsection.classList.toggle("is-collapsed", loadSubsectionCollapsed(key));
   const collapsed = subsection.classList.contains("is-collapsed");
-  btn.setAttribute("aria-expanded", String(!collapsed));
-  btn.textContent = collapsed ? "+" : "−";
-  btn.setAttribute("aria-label", collapsed ? expandLabel : collapseLabel);
-  btn.setAttribute("title", collapsed ? expandLabel : collapseLabel);
+  head.setAttribute("aria-expanded", String(!collapsed));
+  head.setAttribute("aria-label", collapsed ? expandLabel : collapseLabel);
   body.hidden = collapsed;
   body.setAttribute("aria-hidden", String(collapsed));
 }
 
-function initSubsectionCollapse(key, subsectionId, btnId, bodyId, expandLabel, collapseLabel, bindAttr, onToggle) {
+function toggleSubsectionCollapsed(key, subsectionId, bodyId, expandLabel, collapseLabel, onToggle) {
   const subsection = document.getElementById(subsectionId);
-  const btn = document.getElementById(btnId);
   const body = document.getElementById(bodyId);
-  if (!subsection || !btn || !body || btn.dataset[bindAttr] === "1") return;
-  btn.dataset[bindAttr] = "1";
-  btn.addEventListener("click", () => {
-    const collapsed = !subsection.classList.contains("is-collapsed");
-    subsection.classList.toggle("is-collapsed", collapsed);
-    saveSubsectionCollapsed(key, collapsed);
-    btn.setAttribute("aria-expanded", String(!collapsed));
-    btn.textContent = collapsed ? "+" : "−";
-    btn.setAttribute("aria-label", collapsed ? expandLabel : collapseLabel);
-    btn.setAttribute("title", collapsed ? expandLabel : collapseLabel);
-    body.hidden = collapsed;
-    body.setAttribute("aria-hidden", String(collapsed));
-    if (typeof onToggle === "function") onToggle();
+  const head = subsection?.querySelector(".storage-subsection-head");
+  if (!subsection || !body || !head) return;
+  const collapsed = !subsection.classList.contains("is-collapsed");
+  subsection.classList.toggle("is-collapsed", collapsed);
+  saveSubsectionCollapsed(key, collapsed);
+  head.setAttribute("aria-expanded", String(!collapsed));
+  head.setAttribute("aria-label", collapsed ? expandLabel : collapseLabel);
+  body.hidden = collapsed;
+  body.setAttribute("aria-hidden", String(collapsed));
+  if (typeof onToggle === "function") onToggle();
+}
+
+function initSubsectionCollapse(key, subsectionId, bodyId, expandLabel, collapseLabel, bindAttr, onToggle) {
+  const subsection = document.getElementById(subsectionId);
+  const head = subsection?.querySelector(".storage-subsection-head");
+  const body = document.getElementById(bodyId);
+  if (!subsection || !head || !body || head.dataset[bindAttr] === "1") return;
+  head.dataset[bindAttr] = "1";
+  head.setAttribute("role", "button");
+  head.tabIndex = 0;
+  head.setAttribute("aria-controls", bodyId);
+  const go = () =>
+    toggleSubsectionCollapsed(key, subsectionId, bodyId, expandLabel, collapseLabel, onToggle);
+  head.addEventListener("click", go);
+  head.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter" && e.key !== " ") return;
+    e.preventDefault();
+    go();
   });
 }
 
-/** Click subsection title row (not the ± control) toggles collapse — reuses each button's listener. */
-function initSubpanelHeadingClickToggle() {
-  const main = document.querySelector("main.mc-grid");
-  if (!main || main.dataset.subpanelHeadToggleBound === "1") return;
-  main.dataset.subpanelHeadToggleBound = "1";
-  main.addEventListener("click", (e) => {
-    const head = e.target.closest(".storage-subsection-head");
-    if (!head || !main.contains(head)) return;
-    const btn = head.querySelector(".storage-subsection-collapse");
-    if (!btn) return;
-    if (btn.contains(e.target)) return;
-    btn.click();
-  });
+function loadStorageDiskIoCollapsed() {
+  return loadSubsectionCollapsed(STORAGE_DISK_IO_COLLAPSED_KEY);
+}
+
+function applyStorageDiskIoCollapsed() {
+  applySubsectionCollapsed(
+    STORAGE_DISK_IO_COLLAPSED_KEY,
+    "storage-disk-io-subsection",
+    "storage-disk-io-body",
+    "Expand Disk I/O",
+    "Collapse Disk I/O"
+  );
 }
 
 function initStoragePanel() {
@@ -1390,7 +1362,6 @@ function initStoragePanel() {
   applySubsectionCollapsed(
     STORAGE_MOUNTS_COLLAPSED_KEY,
     "storage-mounts-subsection",
-    "storage-mounts-collapse",
     "storage-mounts-body",
     "Expand Mounts",
     "Collapse Mounts"
@@ -1398,7 +1369,6 @@ function initStoragePanel() {
   applySubsectionCollapsed(
     STORAGE_ZFS_COLLAPSED_KEY,
     "zfs-pools-block",
-    "storage-zfs-collapse",
     "storage-zfs-body",
     "Expand ZFS pools",
     "Collapse ZFS pools"
@@ -1407,7 +1377,6 @@ function initStoragePanel() {
   initSubsectionCollapse(
     STORAGE_MOUNTS_COLLAPSED_KEY,
     "storage-mounts-subsection",
-    "storage-mounts-collapse",
     "storage-mounts-body",
     "Expand Mounts",
     "Collapse Mounts",
@@ -1417,14 +1386,21 @@ function initStoragePanel() {
   initSubsectionCollapse(
     STORAGE_ZFS_COLLAPSED_KEY,
     "zfs-pools-block",
-    "storage-zfs-collapse",
     "storage-zfs-body",
     "Expand ZFS pools",
     "Collapse ZFS pools",
     "zfsSubCollapseBound",
     undefined
   );
-  initStorageDiskIoSubsectionCollapse();
+  initSubsectionCollapse(
+    STORAGE_DISK_IO_COLLAPSED_KEY,
+    "storage-disk-io-subsection",
+    "storage-disk-io-body",
+    "Expand Disk I/O",
+    "Collapse Disk I/O",
+    "diskIoSubCollapseBound",
+    connectMetricsStream
+  );
 }
 
 const DISK_DETAIL_PRIORITY = [
@@ -2257,7 +2233,6 @@ function renderZfsPools(pools) {
   applySubsectionCollapsed(
     STORAGE_ZFS_COLLAPSED_KEY,
     "zfs-pools-block",
-    "storage-zfs-collapse",
     "storage-zfs-body",
     "Expand ZFS pools",
     "Collapse ZFS pools"
@@ -2483,7 +2458,6 @@ function initNetworkPanel() {
   applySubsectionCollapsed(
     NETWORK_INTERFACES_COLLAPSED_KEY,
     "net-interfaces-subsection",
-    "net-interfaces-collapse",
     "net-interfaces-body",
     "Expand Interfaces",
     "Collapse Interfaces"
@@ -2491,7 +2465,6 @@ function initNetworkPanel() {
   initSubsectionCollapse(
     NETWORK_INTERFACES_COLLAPSED_KEY,
     "net-interfaces-subsection",
-    "net-interfaces-collapse",
     "net-interfaces-body",
     "Expand Interfaces",
     "Collapse Interfaces",
@@ -2774,58 +2747,6 @@ function saveThermalSortKeyDir() {
   }
 }
 
-function loadThermalSensorsCollapsed() {
-  try {
-    return localStorage.getItem(THERMAL_SENSORS_COLLAPSED_KEY) === "1";
-  } catch (_) {
-    return false;
-  }
-}
-
-function saveThermalSensorsCollapsed(on) {
-  try {
-    localStorage.setItem(THERMAL_SENSORS_COLLAPSED_KEY, on ? "1" : "0");
-  } catch (_) {
-    /* ignore */
-  }
-}
-
-function syncThermalSensorsCollapseUi(subsection, btn) {
-  const body = document.getElementById("thermal-sensors-body");
-  const collapsed = subsection.classList.contains("is-collapsed");
-  if (btn) {
-    btn.setAttribute("aria-expanded", String(!collapsed));
-    btn.textContent = collapsed ? "+" : "−";
-    btn.setAttribute("aria-label", collapsed ? "Expand Sensors" : "Collapse Sensors");
-    btn.setAttribute("title", collapsed ? "Expand Sensors" : "Collapse Sensors");
-  }
-  if (body) {
-    body.hidden = collapsed;
-    body.setAttribute("aria-hidden", String(collapsed));
-  }
-}
-
-function applyThermalSensorsCollapsed() {
-  const subsection = document.getElementById("thermal-sensors-subsection");
-  const btn = document.getElementById("thermal-sensors-collapse");
-  if (!subsection || !btn) return;
-  subsection.classList.toggle("is-collapsed", loadThermalSensorsCollapsed());
-  syncThermalSensorsCollapseUi(subsection, btn);
-}
-
-function initThermalSensorsSubsectionCollapse() {
-  const subsection = document.getElementById("thermal-sensors-subsection");
-  const btn = document.getElementById("thermal-sensors-collapse");
-  if (!subsection || !btn || btn.dataset.thermalSensorsSubBound === "1") return;
-  btn.dataset.thermalSensorsSubBound = "1";
-  btn.addEventListener("click", () => {
-    const collapsed = !subsection.classList.contains("is-collapsed");
-    subsection.classList.toggle("is-collapsed", collapsed);
-    saveThermalSensorsCollapsed(collapsed);
-    syncThermalSensorsCollapseUi(subsection, btn);
-  });
-}
-
 function defaultDirForThermalColumn(col) {
   if (col === "name") return "asc";
   return "desc";
@@ -3033,12 +2954,25 @@ function initThermalPanel() {
   loadThermalSortKeyDir();
   initThermalSortHeaderClicks();
   initThermalRowClicks();
-  applyThermalSensorsCollapsed();
-  initThermalSensorsSubsectionCollapse();
+  applySubsectionCollapsed(
+    THERMAL_SENSORS_COLLAPSED_KEY,
+    "thermal-sensors-subsection",
+    "thermal-sensors-body",
+    "Expand Sensors",
+    "Collapse Sensors"
+  );
+  initSubsectionCollapse(
+    THERMAL_SENSORS_COLLAPSED_KEY,
+    "thermal-sensors-subsection",
+    "thermal-sensors-body",
+    "Expand Sensors",
+    "Collapse Sensors",
+    "thermalSensorsSubBound",
+    undefined
+  );
   applySubsectionCollapsed(
     THERMAL_FANS_COLLAPSED_KEY,
     "thermal-fans-subsection",
-    "thermal-fans-collapse",
     "thermal-fans-body",
     "Expand Fans",
     "Collapse Fans"
@@ -3046,7 +2980,6 @@ function initThermalPanel() {
   initSubsectionCollapse(
     THERMAL_FANS_COLLAPSED_KEY,
     "thermal-fans-subsection",
-    "thermal-fans-collapse",
     "thermal-fans-body",
     "Expand Fans",
     "Collapse Fans",
@@ -4171,7 +4104,6 @@ initPanelLayout();
 initPanelVisibilityControls();
 initAptPackagesToggle();
 initStoragePanel();
-initSubpanelHeadingClickToggle();
 initProcessControls();
 initUpdateIntervalControl();
 
