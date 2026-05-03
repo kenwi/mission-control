@@ -3,9 +3,6 @@
 venv/
 env/
 
-# Docs & guides
-docs/
-
 # Bytecode & caches
 __pycache__/
 *.py[cod]
