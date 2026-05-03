@@ -92,6 +92,15 @@
           <span>Pause live updates</span>
         </label>
       </div>
+      <fieldset class="mc-settings-fieldset">
+        <legend class="mc-settings-legend">Settings backup</legend>
+        <div class="mc-settings-backup-actions">
+          <button type="button" id="settings-export-btn" class="mc-settings-action-btn">Export</button>
+          <button type="button" id="settings-import-btn" class="mc-settings-action-btn">Import…</button>
+        </div>
+        <input type="file" id="settings-import-file" accept="application/json,.json" hidden />
+        <p class="mc-settings-hint">Download or restore all options stored in this browser for Mission Control.</p>
+      </fieldset>
     </div>
   </aside>
 

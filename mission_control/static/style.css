@@ -272,6 +272,41 @@ html, body {
   border-radius: 8px;
 }
 
+.mc-settings-backup-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.35rem;
+}
+
+.mc-settings-action-btn {
+  font: inherit;
+  font-size: 0.8rem;
+  padding: 0.35rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--panel) 88%, var(--border));
+  color: var(--text);
+  cursor: pointer;
+}
+
+.mc-settings-action-btn:hover {
+  border-color: color-mix(in srgb, var(--accent) 30%, var(--border));
+  color: var(--accent);
+}
+
+.mc-settings-action-btn:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  outline-offset: 2px;
+}
+
+.mc-settings-hint {
+  font-size: 0.72rem;
+  color: var(--muted);
+  margin: 0.5rem 0 0;
+  line-height: 1.4;
+}
+
 .mc-settings-legend {
   padding: 0 0.35rem;
   font-size: 0.65rem;

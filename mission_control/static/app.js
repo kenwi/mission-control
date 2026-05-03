@@ -354,6 +354,185 @@ function initUpdateIntervalControl() {
   connectMetricsStream();
 }
 
+function exportMissionControlSettings() {
+  const values = {};
+  for (const key of MC_SETTINGS_KEYS) {
+    try {
+      const v = localStorage.getItem(key);
+      if (v != null) values[key] = v;
+    } catch (_) {
+      /* ignore */
+    }
+  }
+  const payload = {
+    format: SETTINGS_EXPORT_FORMAT,
+    app: "mission-control",
+    exportedAt: new Date().toISOString(),
+    values,
+  };
+  const json = JSON.stringify(payload, null, 2);
+  const blob = new Blob([json], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `mission-control-settings-${new Date().toISOString().slice(0, 10)}.json`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+function normalizeImportedStorageValue(v) {
+  if (v == null) return null;
+  if (typeof v === "string") return v;
+  if (typeof v === "boolean" || typeof v === "number") return String(v);
+  if (typeof v === "object") {
+    try {
+      return JSON.stringify(v);
+    } catch (_) {
+      return null;
+    }
+  }
+  return null;
+}
+
+function importMissionControlSettingsFromJsonString(text) {
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch (_) {
+    return { ok: false, error: "File is not valid JSON." };
+  }
+  if (!parsed || typeof parsed !== "object") {
+    return { ok: false, error: "Invalid settings file." };
+  }
+  let values = null;
+  if (parsed.format === SETTINGS_EXPORT_FORMAT && parsed.values && typeof parsed.values === "object") {
+    values = parsed.values;
+  } else if (parsed.values && typeof parsed.values === "object" && !Array.isArray(parsed.values)) {
+    values = parsed.values;
+  } else if (!("format" in parsed) && !("app" in parsed) && !("exportedAt" in parsed)) {
+    values = parsed;
+  }
+  if (!values || typeof values !== "object" || Array.isArray(values)) {
+    return {
+      ok: false,
+      error: "Could not find settings (expected format 1 with a values object, or a flat key map).",
+    };
+  }
+  let count = 0;
+  for (const key of Object.keys(values)) {
+    if (!MC_SETTINGS_KEY_SET.has(key)) continue;
+    const nv = normalizeImportedStorageValue(values[key]);
+    if (nv == null) continue;
+    try {
+      localStorage.setItem(key, nv);
+      count += 1;
+    } catch (_) {
+      return {
+        ok: false,
+        error: "Could not write to local storage (quota or private mode).",
+      };
+    }
+  }
+  if (count === 0) {
+    return { ok: false, error: "No recognized Mission Control settings keys in file." };
+  }
+  return { ok: true };
+}
+
+function refreshAllSettingsFromStorage() {
+  let themeSaved = "dark";
+  try {
+    themeSaved = localStorage.getItem(THEME_STORAGE_KEY) || "dark";
+  } catch (_) {
+    /* ignore */
+  }
+  applyTheme(themeSaved);
+
+  const hi = document.getElementById("header-title-input");
+  const hv = document.getElementById("header-title-visible");
+  if (hi) hi.value = loadHeaderTitleText();
+  if (hv) hv.checked = loadHeaderTitleVisible();
+  applyHeaderTitleToDom();
+
+  clockFormatHour12 = loadClockFormat() === "12";
+  const clockSel = document.getElementById("clock-format-select");
+  if (clockSel) clockSel.value = clockFormatHour12 ? "12" : "24";
+  tickClock();
+
+  procMemDisplay = loadProcMemDisplay();
+  procMemUnit = loadProcMemUnit();
+  const pDisp = document.getElementById("proc-mem-display-select");
+  const pUnit = document.getElementById("proc-mem-unit-select");
+  if (pDisp) pDisp.value = procMemDisplay;
+  if (pUnit) pUnit.value = procMemUnit;
+  syncProcMemUnitFieldVisibility();
+
+  document.querySelectorAll("#panel-visibility-checks input[type=checkbox]").forEach((input) => {
+    const id = input.dataset.panelId;
+    if (!id) return;
+    const vis = loadPanelVisibility();
+    input.checked = vis[id] !== false;
+  });
+  applyPanelVisibility();
+
+  applyPanelOrder();
+  loadPanelCollapsed();
+
+  loadProcSortKeyDir();
+  applyProcPrefsToForm();
+
+  aptPackagesExpanded = loadAptPackagesExpanded();
+  aptPkgSortDir = loadAptPkgSortDir();
+  const aptSearch = document.getElementById("apt-packages-search");
+  if (aptSearch) aptSearch.value = loadAptPkgSearch();
+
+  const pauseEl = document.getElementById("stream-pause");
+  if (pauseEl) pauseEl.checked = loadStreamPaused();
+  const intervalSel = document.getElementById("update-interval-select");
+  if (intervalSel) intervalSel.value = String(loadUpdateInterval());
+
+  connectMetricsStream();
+  renderProcsTable();
+  renderAptPackagesTable();
+  syncAptPackagesVisibility();
+}
+
+function initSettingsBackup() {
+  const exportBtn = document.getElementById("settings-export-btn");
+  const importBtn = document.getElementById("settings-import-btn");
+  const fileInput = document.getElementById("settings-import-file");
+  exportBtn?.addEventListener("click", () => {
+    try {
+      exportMissionControlSettings();
+    } catch (err) {
+      alert(`Export failed: ${err && err.message ? err.message : err}`);
+    }
+  });
+  importBtn?.addEventListener("click", () => fileInput?.click());
+  fileInput?.addEventListener("change", () => {
+    const f = fileInput.files && fileInput.files[0];
+    if (!f) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const text = typeof reader.result === "string" ? reader.result : "";
+      const result = importMissionControlSettingsFromJsonString(text);
+      if (result.ok) {
+        refreshAllSettingsFromStorage();
+      } else {
+        alert(result.error);
+      }
+      fileInput.value = "";
+    };
+    reader.onerror = () => {
+      alert("Could not read the selected file.");
+      fileInput.value = "";
+    };
+    reader.readAsText(f);
+  });
+}
+
 function mergePanelOrder(saved) {
   const known = new Set(PANEL_IDS);
   const seen = new Set();
@@ -443,7 +622,7 @@ function loadPanelCollapsed() {
   }
   document.querySelectorAll("section.panel[data-panel-id]").forEach((section) => {
     const id = section.dataset.panelId;
-    if (map[id]) section.classList.add("is-collapsed");
+    section.classList.toggle("is-collapsed", !!(id && map[id]));
     syncCollapseButton(section);
   });
 }
@@ -765,6 +944,29 @@ function fmtProcMemCell(p) {
 }
 
 const PROC_SORT_KEYDIR_KEY = "mc-proc-sort-keydir";
+
+const MC_SETTINGS_KEYS = [
+  THEME_STORAGE_KEY,
+  CLOCK_FORMAT_KEY,
+  PANEL_VISIBILITY_KEY,
+  PANEL_ORDER_KEY,
+  PANEL_COLLAPSED_KEY,
+  HEADER_TITLE_KEY,
+  HEADER_TITLE_VISIBLE_KEY,
+  STREAM_PAUSED_KEY,
+  UPDATE_INTERVAL_KEY,
+  APT_PACKAGES_EXPANDED_KEY,
+  APT_PKG_SEARCH_KEY,
+  APT_PKG_SORT_DIR_KEY,
+  PROC_PREFS_KEY,
+  PROC_MEM_UNIT_KEY,
+  PROC_MEM_DISPLAY_KEY,
+  PROC_SORT_KEYDIR_KEY,
+];
+
+const MC_SETTINGS_KEY_SET = new Set(MC_SETTINGS_KEYS);
+const SETTINGS_EXPORT_FORMAT = 1;
+
 /** @type {"pid"|"name"|"cpu"|"mem"} */
 let procSortColumn = "cpu";
 /** @type {"asc"|"desc"} */
@@ -1287,6 +1489,7 @@ initHeaderPrefs();
 initClockFormatControl();
 initProcMemUnitControl();
 initSettingsDrawer();
+initSettingsBackup();
 initPanelLayout();
 initPanelVisibilityControls();
 initAptPackagesToggle();
