@@ -13,6 +13,7 @@ from fastapi.staticfiles import StaticFiles
 
 from mission_control.metrics import (
     NetRateState,
+    collect_interface_detail,
     collect_mount_detail,
     collect_process_detail,
     collect_snapshot,
@@ -72,6 +73,19 @@ def zpool_detail(pool_name: str) -> dict:
     data = collect_zpool_detail(pool_name)
     if data is None:
         raise HTTPException(status_code=404, detail="Pool not found or not available")
+    return data
+
+
+@app.get("/api/net/interface/{ifname}")
+def net_interface_detail(ifname: str) -> dict:
+    """Per-interface addresses, link state, sysfs hints, cumulative counters, and last known rates."""
+    data = collect_interface_detail(ifname)
+    if data is None:
+        raise HTTPException(status_code=404, detail="Interface not found")
+    rates = _net_state.last_rates or {}
+    rb = rates.get(ifname.strip())
+    if rb:
+        data["rates_bps"] = rb
     return data
 
 

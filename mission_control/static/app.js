@@ -133,6 +133,147 @@ function initClockFormatControl() {
   });
 }
 
+const MODAL_WIDTH_KEY = "mc-modal-width-preset";
+
+/** Max content width for detail dialogs (process, mount, ZFS pool, network). */
+const MODAL_WIDTH_PRESETS = {
+  compact: "40rem",
+  medium: "50rem",
+  wide: "62rem",
+  xwide: "75rem",
+};
+
+function normalizeModalWidthPreset(v) {
+  return MODAL_WIDTH_PRESETS[v] ? v : "medium";
+}
+
+function loadModalWidthPreset() {
+  try {
+    const v = localStorage.getItem(MODAL_WIDTH_KEY);
+    if (v && MODAL_WIDTH_PRESETS[v]) return v;
+  } catch (_) {
+    /* ignore */
+  }
+  return "medium";
+}
+
+function applyModalWidthPreset(presetId) {
+  const id = normalizeModalWidthPreset(presetId);
+  document.documentElement.style.setProperty("--mc-modal-max-width", MODAL_WIDTH_PRESETS[id]);
+}
+
+function initModalWidthControl() {
+  const sel = document.getElementById("modal-width-select");
+  const id = loadModalWidthPreset();
+  applyModalWidthPreset(id);
+  if (!sel) return;
+  sel.value = id;
+  sel.addEventListener("change", () => {
+    const v = normalizeModalWidthPreset(sel.value);
+    try {
+      localStorage.setItem(MODAL_WIDTH_KEY, v);
+    } catch (_) {
+      /* ignore */
+    }
+    applyModalWidthPreset(v);
+    sel.value = v;
+  });
+}
+
+const CONTENT_LAYOUT_MAX_KEY = "mc-content-max-preset";
+
+/** Max width for the main dashboard grid (`main.mc-grid`). */
+const CONTENT_LAYOUT_MAX_PRESETS = {
+  narrow: "56rem",
+  balanced: "1200px",
+  wide: "90rem",
+  full: "calc(100vw - 2.5rem)",
+};
+
+function normalizeContentLayoutMaxPreset(v) {
+  return CONTENT_LAYOUT_MAX_PRESETS[v] ? v : "balanced";
+}
+
+function loadContentLayoutMaxPreset() {
+  try {
+    const v = localStorage.getItem(CONTENT_LAYOUT_MAX_KEY);
+    if (v && CONTENT_LAYOUT_MAX_PRESETS[v]) return v;
+  } catch (_) {
+    /* ignore */
+  }
+  return "balanced";
+}
+
+function applyContentLayoutMaxPreset(presetId) {
+  const id = normalizeContentLayoutMaxPreset(presetId);
+  document.documentElement.style.setProperty("--mc-content-max-width", CONTENT_LAYOUT_MAX_PRESETS[id]);
+}
+
+function initContentLayoutMaxControl() {
+  const sel = document.getElementById("content-layout-max-select");
+  const id = loadContentLayoutMaxPreset();
+  applyContentLayoutMaxPreset(id);
+  if (!sel) return;
+  sel.value = id;
+  sel.addEventListener("change", () => {
+    const v = normalizeContentLayoutMaxPreset(sel.value);
+    try {
+      localStorage.setItem(CONTENT_LAYOUT_MAX_KEY, v);
+    } catch (_) {
+      /* ignore */
+    }
+    applyContentLayoutMaxPreset(v);
+    sel.value = v;
+  });
+}
+
+const CONTENT_PADDING_KEY = "mc-content-padding-preset";
+
+/** Padding for `main.mc-grid` (top, horizontal, bottom). */
+const CONTENT_PADDING_PRESETS = {
+  tight: "0.5rem 0.75rem 1rem",
+  balanced: "1rem 1.25rem 2rem",
+  relaxed: "1.25rem 1.75rem 2.5rem",
+  spacious: "1.5rem 2.25rem 3rem",
+};
+
+function normalizeContentPaddingPreset(v) {
+  return CONTENT_PADDING_PRESETS[v] ? v : "balanced";
+}
+
+function loadContentPaddingPreset() {
+  try {
+    const v = localStorage.getItem(CONTENT_PADDING_KEY);
+    if (v && CONTENT_PADDING_PRESETS[v]) return v;
+  } catch (_) {
+    /* ignore */
+  }
+  return "balanced";
+}
+
+function applyContentPaddingPreset(presetId) {
+  const id = normalizeContentPaddingPreset(presetId);
+  document.documentElement.style.setProperty("--mc-content-padding", CONTENT_PADDING_PRESETS[id]);
+}
+
+function initContentPaddingControl() {
+  const sel = document.getElementById("content-padding-select");
+  const id = loadContentPaddingPreset();
+  applyContentPaddingPreset(id);
+  if (!sel) return;
+  sel.value = id;
+  sel.addEventListener("change", () => {
+    const v = normalizeContentPaddingPreset(sel.value);
+    try {
+      localStorage.setItem(CONTENT_PADDING_KEY, v);
+    } catch (_) {
+      /* ignore */
+    }
+    applyContentPaddingPreset(v);
+    sel.value = v;
+  });
+}
+
 function initSettingsDrawer() {
   const drawer = document.getElementById("settings-drawer");
   const backdrop = document.getElementById("settings-backdrop");
@@ -567,6 +708,10 @@ function refreshAllSettingsFromStorage() {
 
   loadProcSortKeyDir();
   loadDiskSortKeyDir();
+  loadNetSortKeyDir();
+  netRateUnit = loadNetRateUnit();
+  const netRateSel = document.getElementById("net-rate-unit-select");
+  if (netRateSel) netRateSel.value = netRateUnit;
   applyProcPrefsToForm();
 
   aptPackagesExpanded = loadAptPackagesExpanded();
@@ -579,10 +724,26 @@ function refreshAllSettingsFromStorage() {
   const intervalSel = document.getElementById("update-interval-select");
   if (intervalSel) intervalSel.value = String(loadUpdateInterval());
 
+  const mp = loadModalWidthPreset();
+  applyModalWidthPreset(mp);
+  const modalW = document.getElementById("modal-width-select");
+  if (modalW) modalW.value = mp;
+
+  const cl = loadContentLayoutMaxPreset();
+  applyContentLayoutMaxPreset(cl);
+  const contentMaxSel = document.getElementById("content-layout-max-select");
+  if (contentMaxSel) contentMaxSel.value = cl;
+
+  const cp = loadContentPaddingPreset();
+  applyContentPaddingPreset(cp);
+  const padSel = document.getElementById("content-padding-select");
+  if (padSel) padSel.value = cp;
+
   connectMetricsStream();
   renderProcsTable();
   renderDisks(lastDisks);
   renderZfsPools(lastZfsPools);
+  renderNet(lastNetwork);
   renderAptPackagesTable();
   syncAptPackagesVisibility();
 }
@@ -793,9 +954,55 @@ function formatBytes(n) {
   return `${v.toFixed(d)} ${units[i]}`;
 }
 
-function formatBps(n) {
-  if (n == null || Number.isNaN(n)) return "—";
-  return `${formatBytes(n)}/s`.replace(" B/", " B/s").replace("/s/s", "/s");
+const NET_RATE_UNIT_KEY = "mc-net-rate-unit";
+/** @type {"mbytes"|"mbits"|"both"} */
+let netRateUnit = "mbytes";
+
+function loadNetRateUnit() {
+  try {
+    const raw = localStorage.getItem(NET_RATE_UNIT_KEY);
+    if (raw === "mbits") return "mbits";
+    if (raw === "both") return "both";
+    return "mbytes";
+  } catch (_) {
+    return "mbytes";
+  }
+}
+
+function normalizeNetRateUnitSelect(v) {
+  if (v === "mbits" || v === "both") return v;
+  return "mbytes";
+}
+
+/** @param {number} v bytes per second */
+function formatNetRateAsBytes(v) {
+  return `${formatBytes(v)}/s`.replace(" B/", " B/s").replace("/s/s", "/s");
+}
+
+/** @param {number} v bytes per second */
+function formatNetRateAsMbits(v) {
+  const bitsPerSec = v * 8;
+  if (bitsPerSec <= 0 && v === 0) return "0 Mbps";
+  const mbps = bitsPerSec / 1e6;
+  if (mbps < 0.001) {
+    const kbps = bitsPerSec / 1e3;
+    return `${kbps.toFixed(2)} Kbps`;
+  }
+  if (mbps < 10) return `${mbps.toFixed(2)} Mbps`;
+  if (mbps < 100) return `${mbps.toFixed(1)} Mbps`;
+  return `${mbps.toFixed(0)} Mbps`;
+}
+
+function formatNetRate(bps) {
+  if (bps == null || !Number.isFinite(Number(bps))) return "—";
+  const v = Number(bps);
+  if (netRateUnit === "mbits") {
+    return formatNetRateAsMbits(v);
+  }
+  if (netRateUnit === "both") {
+    return `${formatNetRateAsBytes(v)} · ${formatNetRateAsMbits(v)}`;
+  }
+  return formatNetRateAsBytes(v);
 }
 
 function formatUptime(sec) {
@@ -931,6 +1138,7 @@ function cmpDiskRows(a, b) {
 
 let lastDisks = [];
 let lastZfsPools = [];
+let lastNetwork = null;
 
 function initDiskSortHeaderClicks() {
   const host = document.getElementById("panel-body-storage");
@@ -1312,11 +1520,218 @@ function initZpoolRowClicks() {
   });
 }
 
+function closeNetDetailModal() {
+  const backdrop = document.getElementById("net-detail-backdrop");
+  const dialog = document.getElementById("net-detail-dialog");
+  if (backdrop) {
+    backdrop.hidden = true;
+    backdrop.setAttribute("aria-hidden", "true");
+  }
+  if (dialog) {
+    dialog.hidden = true;
+    dialog.setAttribute("aria-hidden", "true");
+  }
+}
+
+const NET_IF_DETAIL_PRIORITY = ["rates_bps", "stats", "addresses", "io_counters", "sysfs", "ts"];
+
+const NET_IF_DETAIL_LABELS = {
+  rates_bps: "Throughput (last sample)",
+  stats: "Link (psutil)",
+  addresses: "Addresses",
+  io_counters: "Totals since boot",
+  sysfs: "/sys/class/net",
+  ts: "Queried at",
+};
+
+function formatNetIfDetailScalar(key, val) {
+  if (val == null) return "—";
+  if (key === "ts" && typeof val === "number") {
+    try {
+      return `${val} (${new Date(val * 1000).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "medium" })})`;
+    } catch (_) {
+      return String(val);
+    }
+  }
+  if (key === "rates_bps" && val && typeof val === "object") {
+    const d = Number(val.recv_bps);
+    const u = Number(val.sent_bps);
+    return `Down ${formatNetRate(d)} · Up ${formatNetRate(u)}`;
+  }
+  if (key === "addresses" && Array.isArray(val)) {
+    if (!val.length) return "—";
+    return val
+      .map((a) => {
+        const bits = [
+          a.family,
+          a.address || null,
+          a.netmask ? `mask ${a.netmask}` : null,
+          a.broadcast ? `brd ${a.broadcast}` : null,
+          a.ptp ? `ptp ${a.ptp}` : null,
+        ].filter(Boolean);
+        return bits.join(" · ");
+      })
+      .join("\n");
+  }
+  if (key === "io_counters" && val && typeof val === "object") {
+    const lines = [];
+    if (val.bytes_recv != null) lines.push(`Bytes recv: ${formatBytes(val.bytes_recv)}`);
+    if (val.bytes_sent != null) lines.push(`Bytes sent: ${formatBytes(val.bytes_sent)}`);
+    if (val.packets_recv != null) lines.push(`Packets recv: ${val.packets_recv}`);
+    if (val.packets_sent != null) lines.push(`Packets sent: ${val.packets_sent}`);
+    if (val.errin != null) lines.push(`Errors in: ${val.errin}`);
+    if (val.errout != null) lines.push(`Errors out: ${val.errout}`);
+    if (val.dropin != null) lines.push(`Dropped in: ${val.dropin}`);
+    if (val.dropout != null) lines.push(`Dropped out: ${val.dropout}`);
+    return lines.length ? lines.join("\n") : "—";
+  }
+  if (key === "stats" && val && typeof val === "object") {
+    const lines = [];
+    if (val.isup !== undefined) lines.push(`Up: ${val.isup ? "yes" : "no"}`);
+    if (val.duplex != null && String(val.duplex)) lines.push(`Duplex: ${val.duplex}`);
+    if (val.speed != null) {
+      if (Number(val.speed) > 0) lines.push(`Speed: ${val.speed} Mb/s`);
+      else lines.push("Speed: unknown");
+    }
+    if (val.mtu != null) lines.push(`MTU: ${val.mtu}`);
+    if (val.flags != null && String(val.flags)) lines.push(`Flags: ${val.flags}`);
+    return lines.length ? lines.join("\n") : "—";
+  }
+  if (key === "sysfs" && val && typeof val === "object") {
+    const keys = Object.keys(val).sort();
+    if (!keys.length) return "—";
+    return keys.map((k) => `${k}: ${val[k]}`).join("\n");
+  }
+  if (typeof val === "object") {
+    try {
+      return JSON.stringify(val, null, 2);
+    } catch (_) {
+      return String(val);
+    }
+  }
+  return String(val);
+}
+
+function renderNetInterfaceDetailHtml(data) {
+  if (!data) return "<p class=\"tile-meta\">No data.</p>";
+  const shown = new Set();
+  const preKeys = new Set(["addresses", "io_counters", "stats", "sysfs"]);
+  let html = "<dl class=\"proc-detail-dl\">";
+  for (const k of NET_IF_DETAIL_PRIORITY) {
+    if (!Object.prototype.hasOwnProperty.call(data, k)) continue;
+    const v = data[k];
+    if (v == null && k !== "stats") continue;
+    const label = NET_IF_DETAIL_LABELS[k] || k;
+    if (preKeys.has(k)) {
+      shown.add(k);
+      const content = formatNetIfDetailScalar(k, v);
+      html += `<dt>${escapeHtml(label)}</dt><dd><pre class="proc-detail-json proc-detail-json-inline">${escapeHtml(
+        content
+      )}</pre></dd>`;
+      continue;
+    }
+    shown.add(k);
+    html += `<dt>${escapeHtml(label)}</dt><dd>${escapeHtml(formatNetIfDetailScalar(k, v))}</dd>`;
+  }
+  const skipRest = new Set(["ifname", ...shown]);
+  const restKeys = Object.keys(data).filter((k) => !skipRest.has(k));
+  restKeys.sort();
+  for (const k of restKeys) {
+    const v = data[k];
+    if (v == null) continue;
+    html += `<dt>${escapeHtml(k)}</dt><dd>${escapeHtml(formatNetIfDetailScalar(k, v))}</dd>`;
+  }
+  html += "</dl>";
+  html +=
+    "<details class=\"proc-detail-raw\"><summary>All fields (JSON)</summary>" +
+    `<pre class="proc-detail-json">${escapeHtml(JSON.stringify(data, null, 2))}</pre></details>`;
+  return html;
+}
+
+function openNetDetailModal(ifname) {
+  const backdrop = document.getElementById("net-detail-backdrop");
+  const dialog = document.getElementById("net-detail-dialog");
+  const body = document.getElementById("net-detail-body");
+  const title = document.getElementById("net-detail-title");
+  if (!backdrop || !dialog || !body || !title) return;
+
+  title.textContent = ifname;
+  body.innerHTML = "<p class=\"tile-meta\">Loading…</p>";
+  backdrop.hidden = false;
+  dialog.hidden = false;
+  backdrop.setAttribute("aria-hidden", "false");
+  dialog.setAttribute("aria-hidden", "false");
+
+  document.getElementById("net-detail-close")?.focus();
+
+  const seg = encodeURIComponent(ifname);
+  fetch(`/api/net/interface/${seg}`)
+    .then((res) => {
+      if (res.status === 404) throw new Error("Interface not found.");
+      if (!res.ok) throw new Error(`Request failed (${res.status}).`);
+      return res.json();
+    })
+    .then((d) => {
+      title.textContent = d.ifname || ifname;
+      body.innerHTML = renderNetInterfaceDetailHtml(d);
+    })
+    .catch((err) => {
+      title.textContent = ifname;
+      body.innerHTML = `<p class="tile-meta">${escapeHtml(err.message || String(err))}</p>`;
+    });
+}
+
+function initNetDetailModal() {
+  const backdrop = document.getElementById("net-detail-backdrop");
+  const closeBtn = document.getElementById("net-detail-close");
+  closeBtn?.addEventListener("click", closeNetDetailModal);
+  backdrop?.addEventListener("click", closeNetDetailModal);
+}
+
+function initNetInterfaceRowClicks() {
+  const wrap = document.getElementById("net-table");
+  if (!wrap || wrap.dataset.netIfaceRowBound === "1") return;
+  wrap.dataset.netIfaceRowBound = "1";
+  wrap.addEventListener("click", (e) => {
+    const tr = e.target.closest("tbody tr.net-row-detail");
+    if (!tr || !wrap.contains(tr)) return;
+    const enc = tr.getAttribute("data-ifname") || "";
+    let name = "";
+    try {
+      name = decodeURIComponent(enc);
+    } catch (_) {
+      return;
+    }
+    if (!name) return;
+    openNetDetailModal(name);
+  });
+  wrap.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter" && e.key !== " ") return;
+    const tr = e.target.closest("tbody tr.net-row-detail");
+    if (!tr || !wrap.contains(tr)) return;
+    e.preventDefault();
+    const enc = tr.getAttribute("data-ifname") || "";
+    let name = "";
+    try {
+      name = decodeURIComponent(enc);
+    } catch (_) {
+      return;
+    }
+    if (!name) return;
+    openNetDetailModal(name);
+  });
+}
+
 function initModalEscapeToClose() {
   if (initModalEscapeToClose.done) return;
   initModalEscapeToClose.done = true;
   document.addEventListener("keydown", (e) => {
     if (e.key !== "Escape") return;
+    const netDlg = document.getElementById("net-detail-dialog");
+    if (netDlg && !netDlg.hidden) {
+      closeNetDetailModal();
+      return;
+    }
     const zpoolDlg = document.getElementById("zpool-detail-dialog");
     if (zpoolDlg && !zpoolDlg.hidden) {
       closeZpoolDetailModal();
@@ -1507,25 +1922,187 @@ function setBar(id, pct) {
   if (el) el.style.width = `${Math.min(100, Math.max(0, pct))}%`;
 }
 
+const NET_SORT_KEYDIR_KEY = "mc-net-sort-keydir";
+
+/** @type {"iface"|"ip"|"down"|"up"|"rx"|"tx"} */
+let netSortColumn = "iface";
+/** @type {"asc"|"desc"} */
+let netSortDir = "asc";
+
+function normalizeNetSortColumn(k) {
+  if (k === "down" || k === "up" || k === "iface" || k === "ip" || k === "rx" || k === "tx") return k;
+  return "iface";
+}
+
+function loadNetSortKeyDir() {
+  try {
+    const raw = localStorage.getItem(NET_SORT_KEYDIR_KEY);
+    if (raw) {
+      const o = JSON.parse(raw);
+      if (o && typeof o === "object") {
+        netSortColumn = normalizeNetSortColumn(o.column || o.key);
+        netSortDir = o.dir === "desc" ? "desc" : "asc";
+      }
+    }
+  } catch (_) {
+    /* ignore */
+  }
+}
+
+function saveNetSortKeyDir() {
+  try {
+    localStorage.setItem(
+      NET_SORT_KEYDIR_KEY,
+      JSON.stringify({ column: netSortColumn, dir: netSortDir })
+    );
+  } catch (_) {
+    /* ignore */
+  }
+}
+
+function defaultDirForNetColumn(col) {
+  if (col === "iface" || col === "ip") return "asc";
+  return "desc";
+}
+
+function onNetColumnHeaderClick(key) {
+  const c = normalizeNetSortColumn(key);
+  if (netSortColumn === c) {
+    netSortDir = netSortDir === "asc" ? "desc" : "asc";
+  } else {
+    netSortColumn = c;
+    netSortDir = defaultDirForNetColumn(c);
+  }
+  saveNetSortKeyDir();
+  renderNet(lastNetwork);
+}
+
+function netSortAriaSort(col) {
+  if (netSortColumn !== col) return "none";
+  return netSortDir === "asc" ? "ascending" : "descending";
+}
+
+function netSortArrowHtml(col) {
+  if (netSortColumn !== col) return "";
+  const ch = netSortDir === "asc" ? "\u2191" : "\u2193";
+  return ` <span class="proc-sort-ind" aria-hidden="true">${ch}</span>`;
+}
+
+function cmpNetRows(a, b) {
+  const dir = netSortDir === "asc" ? 1 : -1;
+  let cmp = 0;
+  switch (netSortColumn) {
+    case "iface":
+      cmp = String(a.name || "").localeCompare(String(b.name || ""), undefined, {
+        sensitivity: "base",
+      });
+      break;
+    case "ip":
+      cmp = String(a.ip || "").localeCompare(String(b.ip || ""), undefined, {
+        sensitivity: "base",
+        numeric: true,
+      });
+      break;
+    case "down":
+      cmp = (a.recv_bps || 0) - (b.recv_bps || 0);
+      break;
+    case "up":
+      cmp = (a.sent_bps || 0) - (b.sent_bps || 0);
+      break;
+    case "rx":
+      cmp = (Number(a.bytes_recv) || 0) - (Number(b.bytes_recv) || 0);
+      break;
+    case "tx":
+      cmp = (Number(a.bytes_sent) || 0) - (Number(b.bytes_sent) || 0);
+      break;
+    default:
+      cmp = 0;
+  }
+  if (cmp !== 0) return dir * cmp;
+  return String(a.name || "").localeCompare(String(b.name || ""), undefined, { sensitivity: "base" });
+}
+
+function initNetSortHeaderClicks() {
+  const host = document.getElementById("panel-body-network");
+  if (!host || host.dataset.netSortBound === "1") return;
+  host.dataset.netSortBound = "1";
+  host.addEventListener("click", (e) => {
+    const th = e.target.closest("th.net-sortable[data-sort-key]");
+    if (!th || !host.contains(th)) return;
+    onNetColumnHeaderClick(th.getAttribute("data-sort-key") || "");
+  });
+  host.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter" && e.key !== " ") return;
+    const th = e.target.closest("th.net-sortable[data-sort-key]");
+    if (!th || !host.contains(th)) return;
+    e.preventDefault();
+    onNetColumnHeaderClick(th.getAttribute("data-sort-key") || "");
+  });
+}
+
+function initNetRateUnitControl() {
+  netRateUnit = loadNetRateUnit();
+  const sel = document.getElementById("net-rate-unit-select");
+  if (!sel) return;
+  sel.value = netRateUnit;
+  sel.addEventListener("change", () => {
+    netRateUnit = normalizeNetRateUnitSelect(sel.value);
+    try {
+      localStorage.setItem(NET_RATE_UNIT_KEY, netRateUnit);
+    } catch (_) {
+      /* ignore */
+    }
+    renderNet(lastNetwork);
+  });
+}
+
+function initNetworkPanel() {
+  loadNetSortKeyDir();
+  initNetSortHeaderClicks();
+  initNetRateUnitControl();
+  initNetInterfaceRowClicks();
+}
+
 function renderNet(net) {
   const wrap = document.getElementById("net-table");
   if (!wrap) return;
-  const rates = (net && net.rates) || {};
-  const ifs = net && net.interfaces ? Object.keys(net.interfaces) : [];
-  if (!ifs.length) {
+  if (!net || !net.interfaces || !Object.keys(net.interfaces).length) {
     wrap.innerHTML = "<p class=\"tile-meta\">No interfaces</p>";
     return;
   }
-  const rows = ifs
-    .sort()
-    .map((name) => {
-      const r = rates[name] || {};
-      return `<tr><td>${escapeHtml(name)}</td><td>${formatBps(
-        r.recv_bps
-      )}</td><td>${formatBps(r.sent_bps)}</td></tr>`;
+  const rates = net.rates || {};
+  const list = Object.keys(net.interfaces).map((name) => {
+    const iface = net.interfaces[name] || {};
+    return {
+      name,
+      ip: String(iface.ip || "").trim(),
+      bytes_recv: Number(iface.bytes_recv),
+      bytes_sent: Number(iface.bytes_sent),
+      recv_bps: Number(rates[name] && rates[name].recv_bps) || 0,
+      sent_bps: Number(rates[name] && rates[name].sent_bps) || 0,
+    };
+  });
+  list.sort(cmpNetRows);
+  const rows = list
+    .map((row) => {
+      const enc = encodeURIComponent(row.name);
+      const ipDisp = row.ip || "—";
+      const rxDisp = Number.isFinite(row.bytes_recv) ? formatBytes(row.bytes_recv) : "—";
+      const txDisp = Number.isFinite(row.bytes_sent) ? formatBytes(row.bytes_sent) : "—";
+      return `<tr class="net-row-detail" role="button" tabindex="0" data-ifname="${enc}" title="Interface details" aria-label="Open details for interface ${escapeHtml(row.name)}"><td class="net-td-iface">${escapeHtml(row.name)}</td><td class="net-td-ip" title="${escapeHtml(row.ip || "")}">${escapeHtml(ipDisp)}</td><td class="net-td-metric">${escapeHtml(
+        formatNetRate(row.recv_bps)
+      )}</td><td class="net-td-metric">${escapeHtml(formatNetRate(row.sent_bps))}</td><td class="net-td-metric net-td-bytes" title="Bytes received (cumulative)">${escapeHtml(rxDisp)}</td><td class="net-td-metric net-td-bytes" title="Bytes sent (cumulative)">${escapeHtml(txDisp)}</td></tr>`;
     })
     .join("");
-  wrap.innerHTML = `<table class="mc-table"><thead><tr><th>Interface</th><th>↓</th><th>↑</th></tr></thead><tbody>${rows}</tbody></table>`;
+  const rateExtraClass = netRateUnit === "both" ? " mc-table-net-rate-both" : "";
+  wrap.innerHTML = `<table class="mc-table mc-table-net${rateExtraClass}" aria-label="Network interfaces"><thead><tr>
+      <th class="net-th net-sortable" scope="col" data-sort-key="iface" role="columnheader" tabindex="0" aria-sort="${netSortAriaSort("iface")}">Interface${netSortArrowHtml("iface")}</th>
+      <th class="net-th net-sortable net-th-ip" scope="col" data-sort-key="ip" role="columnheader" tabindex="0" aria-sort="${netSortAriaSort("ip")}">IP address${netSortArrowHtml("ip")}</th>
+      <th class="net-th net-sortable net-th-metric" scope="col" data-sort-key="down" role="columnheader" tabindex="0" aria-sort="${netSortAriaSort("down")}">Down${netSortArrowHtml("down")}</th>
+      <th class="net-th net-sortable net-th-metric" scope="col" data-sort-key="up" role="columnheader" tabindex="0" aria-sort="${netSortAriaSort("up")}">Up${netSortArrowHtml("up")}</th>
+      <th class="net-th net-sortable net-th-metric" scope="col" data-sort-key="rx" role="columnheader" tabindex="0" aria-sort="${netSortAriaSort("rx")}" title="Bytes received (cumulative since boot)">RX${netSortArrowHtml("rx")}</th>
+      <th class="net-th net-sortable net-th-metric" scope="col" data-sort-key="tx" role="columnheader" tabindex="0" aria-sort="${netSortAriaSort("tx")}" title="Bytes sent (cumulative since boot)">TX${netSortArrowHtml("tx")}</th>
+    </tr></thead><tbody>${rows}</tbody></table>`;
 }
 
 function escapeHtml(s) {
@@ -1929,6 +2506,11 @@ const MC_SETTINGS_KEYS = [
   PROC_CPU_SCALE_KEY,
   PROC_SORT_KEYDIR_KEY,
   DISK_SORT_KEYDIR_KEY,
+  NET_RATE_UNIT_KEY,
+  NET_SORT_KEYDIR_KEY,
+  MODAL_WIDTH_KEY,
+  CONTENT_LAYOUT_MAX_KEY,
+  CONTENT_PADDING_KEY,
 ];
 
 const MC_SETTINGS_KEY_SET = new Set(MC_SETTINGS_KEYS);
@@ -2481,7 +3063,8 @@ function applySnapshot(data) {
   renderDisks(data.disk);
   lastZfsPools = Array.isArray(data.zfs_pools) ? data.zfs_pools : [];
   renderZfsPools(lastZfsPools);
-  renderNet(data.network);
+  lastNetwork = data.network ?? null;
+  renderNet(lastNetwork);
 
   lastProcesses = Array.isArray(data.processes) ? data.processes : [];
   renderProcsTable();
@@ -2510,12 +3093,17 @@ function tickClock() {
 initTheme();
 initHeaderPrefs();
 initClockFormatControl();
+initModalWidthControl();
+initContentLayoutMaxControl();
+initContentPaddingControl();
 initProcMemUnitControl();
+initNetworkPanel();
 initSettingsDrawer();
 initSettingsBackup();
 initProcessDetailModal();
 initDiskDetailModal();
 initZpoolDetailModal();
+initNetDetailModal();
 initModalEscapeToClose();
 initPanelLayout();
 initPanelVisibilityControls();

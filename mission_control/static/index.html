@@ -9,6 +9,23 @@
         var k = "mc-theme";
         var v = localStorage.getItem(k);
         if (v) document.documentElement.setAttribute("data-theme", v);
+        var mk = "mc-modal-width-preset";
+        var mv = localStorage.getItem(mk);
+        var mm = { compact: "40rem", medium: "50rem", wide: "62rem", xwide: "75rem" };
+        if (mv && mm[mv]) document.documentElement.style.setProperty("--mc-modal-max-width", mm[mv]);
+        var ck = "mc-content-max-preset";
+        var cv = localStorage.getItem(ck);
+        var cm = { narrow: "56rem", balanced: "1200px", wide: "90rem", full: "calc(100vw - 2.5rem)" };
+        if (cv && cm[cv]) document.documentElement.style.setProperty("--mc-content-max-width", cm[cv]);
+        var pk = "mc-content-padding-preset";
+        var pv = localStorage.getItem(pk);
+        var pm = {
+          tight: "0.5rem 0.75rem 1rem",
+          balanced: "1rem 1.25rem 2rem",
+          relaxed: "1.25rem 1.75rem 2.5rem",
+          spacious: "1.5rem 2.25rem 3rem",
+        };
+        if (pv && pm[pv]) document.documentElement.style.setProperty("--mc-content-padding", pm[pv]);
       } catch (e) {}
     })();
   </script>
@@ -57,6 +74,33 @@
         </select>
       </div>
       <div class="mc-settings-field">
+        <label for="modal-width-select" class="mc-settings-label">Detail modal width</label>
+        <select id="modal-width-select" class="mc-theme-select mc-settings-control" aria-label="Width of process, mount, ZFS pool, and network detail dialogs">
+          <option value="compact">Compact (40rem)</option>
+          <option value="medium" selected>Balanced (50rem)</option>
+          <option value="wide">Wide (62rem)</option>
+          <option value="xwide">Extra wide (75rem)</option>
+        </select>
+      </div>
+      <div class="mc-settings-field">
+        <label for="content-layout-max-select" class="mc-settings-label">Dashboard width</label>
+        <select id="content-layout-max-select" class="mc-theme-select mc-settings-control" aria-label="Maximum width of the main information panels grid">
+          <option value="narrow">Narrow (56rem)</option>
+          <option value="balanced" selected>Balanced (1200px)</option>
+          <option value="wide">Wide (90rem)</option>
+          <option value="full">Full width (viewport minus padding)</option>
+        </select>
+      </div>
+      <div class="mc-settings-field">
+        <label for="content-padding-select" class="mc-settings-label">Dashboard padding</label>
+        <select id="content-padding-select" class="mc-theme-select mc-settings-control" aria-label="Outer padding around the main information panels grid">
+          <option value="tight">Tight — 0.5 · 0.75 · 1rem</option>
+          <option value="balanced" selected>Balanced — 1 · 1.25 · 2rem</option>
+          <option value="relaxed">Relaxed — 1.25 · 1.75 · 2.5rem</option>
+          <option value="spacious">Spacious — 1.5 · 2.25 · 3rem</option>
+        </select>
+      </div>
+      <div class="mc-settings-field">
         <label for="proc-mem-display-select" class="mc-settings-label">Process memory column</label>
         <select id="proc-mem-display-select" class="mc-theme-select mc-settings-control" aria-label="What to show in the Top processes memory column">
           <option value="percent">Percent only</option>
@@ -76,6 +120,14 @@
         <select id="proc-cpu-scale-select" class="mc-theme-select mc-settings-control" aria-label="How CPU % is scaled in the top processes table">
           <option value="machine" selected>All CPUs (like Compute tile)</option>
           <option value="per_core">Per logical CPU (can exceed 100%)</option>
+        </select>
+      </div>
+      <div class="mc-settings-field">
+        <label for="net-rate-unit-select" class="mc-settings-label">Network throughput</label>
+        <select id="net-rate-unit-select" class="mc-theme-select mc-settings-control" aria-label="Display interface throughput in bytes per second, bits per second, or both">
+          <option value="mbytes">Megabytes per second (MB/s)</option>
+          <option value="mbits">Megabits per second (Mbps)</option>
+          <option value="both">Both MB/s and Mbps</option>
         </select>
       </div>
       <div class="mc-settings-field">
@@ -291,6 +343,23 @@
       <button type="button" id="zpool-detail-close" class="mc-modal-close" aria-label="Close pool details">×</button>
     </div>
     <div id="zpool-detail-body" class="mc-modal-body"></div>
+  </div>
+
+  <div id="net-detail-backdrop" class="mc-modal-backdrop" hidden aria-hidden="true"></div>
+  <div
+    id="net-detail-dialog"
+    class="mc-modal"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="net-detail-title"
+    hidden
+    aria-hidden="true"
+  >
+    <div class="mc-modal-head">
+      <h2 id="net-detail-title" class="mc-modal-title">Interface</h2>
+      <button type="button" id="net-detail-close" class="mc-modal-close" aria-label="Close interface details">×</button>
+    </div>
+    <div id="net-detail-body" class="mc-modal-body"></div>
   </div>
 
   <script src="/assets/app.js" defer></script>

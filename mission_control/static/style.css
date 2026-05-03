@@ -520,8 +520,8 @@ input.mc-settings-text:focus-visible {
 main.mc-grid {
   display: grid;
   gap: 1rem;
-  padding: 1rem 1.25rem 2rem;
-  max-width: 1200px;
+  padding: var(--mc-content-padding, 1rem 1.25rem 2rem);
+  max-width: var(--mc-content-max-width, 1200px);
   margin: 0 auto;
 }
 
@@ -960,6 +960,63 @@ table.mc-table.mc-table-procs {
   border-top: 1px solid var(--border);
 }
 
+.mc-table-net th.net-sortable {
+  cursor: pointer;
+  user-select: none;
+}
+
+.mc-table-net th.net-sortable:hover {
+  color: var(--text);
+}
+
+.mc-table-net .net-th-metric,
+.mc-table-net .net-td-metric {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.mc-table-net .net-td-iface {
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 16rem;
+}
+
+.mc-table-net .net-th-ip,
+.mc-table-net .net-td-ip {
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 18rem;
+}
+
+.mc-table-net .net-td-ip {
+  font-size: 0.88em;
+  color: var(--muted);
+}
+
+.mc-table-net tbody tr.net-row-detail {
+  cursor: pointer;
+}
+
+.mc-table-net tbody tr.net-row-detail:hover {
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+}
+
+.mc-table-net tbody tr.net-row-detail:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  outline-offset: -2px;
+}
+
+.mc-table-net.mc-table-net-rate-both .net-td-metric:not(.net-td-bytes) {
+  white-space: normal;
+  max-width: 14rem;
+  line-height: 1.35;
+}
+
 .zfs-pools-block {
   margin-top: 1.15rem;
 }
@@ -1103,7 +1160,7 @@ table.mc-table.mc-table-procs {
   left: 50%;
   top: 50%;
   transform: translate(-50%, -50%) scale(0.97);
-  width: min(40rem, calc(100vw - 1.5rem));
+  width: min(var(--mc-modal-max-width, 50rem), calc(100vw - 1.5rem));
   max-height: min(88vh, 100dvh - 2rem);
   display: flex;
   flex-direction: column;

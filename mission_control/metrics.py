@@ -430,9 +430,34 @@ def _zfs_resolve_dataset(part: Any | None, mountpoint: str) -> str | None:
     return None
 
 
+def _iface_ip_display(ifname: str, addrs_map: dict[str, list[Any]]) -> str:
+    """Comma-separated IPv4s for table column; else shortened global IPv6; else empty."""
+    rows = addrs_map.get(ifname) or []
+    v4: list[str] = []
+    v6: list[str] = []
+    for a in rows:
+        fam = _json_enumish(getattr(a, "family", None))
+        addr = (a.address or "").strip()
+        if not addr:
+            continue
+        if fam in ("AF_INET", "2", 2):  # psutil.AddressFamily.AF_INET
+            v4.append(addr)
+        elif fam in ("AF_INET6", "10", 10):
+            al = addr.lower().split("%")[0]
+            if al.startswith("fe80:"):
+                continue
+            v6.append(addr.split("%")[0])
+    if v4:
+        return ", ".join(v4)
+    if v6:
+        return ", ".join(v6[:4]) + ("…" if len(v6) > 4 else "")
+    return ""
+
+
 def _net_io() -> dict[str, Any]:
     now = time.time()
     counters = psutil.net_io_counters(pernic=True)
+    addrs_map = psutil.net_if_addrs()
     # Store rates requires previous sample; caller passes cache via module-level is ugly.
     # We return raw counters + timestamp; frontend can compute delta or we do two-phase in stream.
     return {
@@ -447,11 +472,115 @@ def _net_io() -> dict[str, Any]:
                 "errout": io.errout,
                 "dropin": io.dropin,
                 "dropout": io.dropout,
+                "ip": _iface_ip_display(name, addrs_map),
             }
             for name, io in counters.items()
             if not name.startswith("lo")
         },
     }
+
+
+_IFNAME_RE = re.compile(r"^[a-zA-Z0-9._@-]{1,64}$")
+
+
+def _json_enumish(x: Any) -> Any:
+    if x is None:
+        return None
+    if isinstance(x, (bool, int, float, str)):
+        return x
+    if isinstance(x, bytes):
+        return x.decode("utf-8", errors="replace")
+    name = getattr(x, "name", None)
+    if isinstance(name, str):
+        return name
+    return str(x)
+
+
+def _net_sysfs_reader(ifname: str) -> dict[str, str]:
+    """Best-effort sysfs snapshot for ``/sys/class/net/<ifname>``."""
+    out: dict[str, str] = {}
+    base = Path("/sys/class/net") / ifname
+    if not base.is_dir():
+        return out
+    for rel in (
+        "operstate",
+        "carrier",
+        "carrier_changes",
+        "address",
+        "address_assign_type",
+        "type",
+        "speed",
+        "duplex",
+        "mtu",
+    ):
+        fp = base / rel
+        if fp.is_file():
+            try:
+                out[rel] = fp.read_text(encoding="utf-8", errors="replace").strip()
+            except OSError:
+                pass
+    return out
+
+
+def collect_interface_detail(ifname: str) -> dict[str, Any] | None:
+    """Addresses, link stats, cumulative I/O counters, and sysfs hints for one interface."""
+    name = (ifname or "").strip()
+    if not _IFNAME_RE.match(name):
+        return None
+
+    counters_map = psutil.net_io_counters(pernic=True)
+    addrs_map = psutil.net_if_addrs()
+    stats_map = psutil.net_if_stats()
+
+    io = counters_map.get(name)
+    if io is None and name not in addrs_map and name not in stats_map:
+        return None
+
+    out: dict[str, Any] = {
+        "ifname": name,
+        "ts": time.time(),
+    }
+
+    if io is not None:
+        out["io_counters"] = {
+            "bytes_sent": io.bytes_sent,
+            "bytes_recv": io.bytes_recv,
+            "packets_sent": io.packets_sent,
+            "packets_recv": io.packets_recv,
+            "errin": io.errin,
+            "errout": io.errout,
+            "dropin": io.dropin,
+            "dropout": io.dropout,
+        }
+
+    addrs = addrs_map.get(name) or []
+    out["addresses"] = [
+        {
+            "family": _json_enumish(getattr(a, "family", None)),
+            "address": a.address or "",
+            "netmask": a.netmask or "",
+            "broadcast": a.broadcast or "",
+            "ptp": getattr(a, "ptp", None) or "",
+        }
+        for a in addrs
+    ]
+
+    stats = stats_map.get(name)
+    if stats is not None:
+        st_flags = getattr(stats, "flags", None)
+        out["stats"] = {
+            "isup": stats.isup,
+            "duplex": _json_enumish(stats.duplex),
+            "speed": stats.speed,
+            "mtu": stats.mtu,
+            "flags": _json_enumish(st_flags) if st_flags is not None else None,
+        }
+
+    sysfs = _net_sysfs_reader(name)
+    if sysfs:
+        out["sysfs"] = sysfs
+
+    return out
 
 
 def _top_processes(limit: int = 12) -> list[dict[str, Any]]:
@@ -750,11 +879,13 @@ def _apt_upgradable_list() -> list[dict[str, str]] | None:
 @dataclass
 class NetRateState:
     last: dict[str, Any] | None = None
+    last_rates: dict[str, dict[str, float]] | None = None
 
     def with_rates(self, current: dict[str, Any]) -> dict[str, Any]:
         prev = self.last
         self.last = current
         if not prev:
+            self.last_rates = {}
             return {**current, "rates": {}}
         dt = max(current["ts"] - prev["ts"], 1e-6)
         rates: dict[str, dict[str, float]] = {}
@@ -768,6 +899,7 @@ class NetRateState:
                 "recv_bps": max(0, (c["bytes_recv"] - p["bytes_recv"]) / dt),
                 "sent_bps": max(0, (c["bytes_sent"] - p["bytes_sent"]) / dt),
             }
+        self.last_rates = rates
         return {**current, "rates": rates}
 
 
