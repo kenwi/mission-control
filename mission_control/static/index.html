@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <script>
+    (function () {
+      try {
+        var k = "mc-theme";
+        var v = localStorage.getItem(k);
+        if (v) document.documentElement.setAttribute("data-theme", v);
+      } catch (e) {}
+    })();
+  </script>
+  <title>Mission Control</title>
+  <link rel="stylesheet" href="/assets/style.css" />
+</head>
+<body>
+  <header class="mc-header">
+    <div class="mc-brand">
+      <span class="mc-title">Mission Control</span>
+      <span id="host-line" class="mc-sub">—</span>
+    </div>
+    <div class="mc-status">
+      <span id="conn-pill" class="pill pill-warn">connecting…</span>
+      <span id="clock" class="mc-clock">—</span>
+      <button type="button" id="settings-toggle" class="mc-settings-btn" aria-label="Open settings" aria-expanded="false" aria-controls="settings-drawer" title="Settings">⚙</button>
+    </div>
+  </header>
+
+  <div id="settings-backdrop" class="mc-drawer-backdrop" aria-hidden="true"></div>
+  <aside id="settings-drawer" class="mc-settings-drawer" aria-label="Settings" aria-hidden="true">
+    <div class="mc-drawer-head">
+      <h2 class="mc-drawer-title">Options</h2>
+      <button type="button" id="settings-close" class="mc-drawer-close" aria-label="Close settings">×</button>
+    </div>
+    <div class="mc-drawer-body">
+      <div class="mc-settings-field">
+        <label for="theme-select" class="mc-settings-label">Theme</label>
+        <select id="theme-select" class="mc-theme-select mc-settings-control" aria-label="Color theme"></select>
+      </div>
+      <div class="mc-settings-field">
+        <label for="clock-format-select" class="mc-settings-label">Clock</label>
+        <select id="clock-format-select" class="mc-theme-select mc-settings-control" aria-label="12-hour or 24-hour clock">
+          <option value="24">24-hour</option>
+          <option value="12">12-hour</option>
+        </select>
+      </div>
+      <div class="mc-settings-field">
+        <label for="proc-mem-display-select" class="mc-settings-label">Process memory column</label>
+        <select id="proc-mem-display-select" class="mc-theme-select mc-settings-control" aria-label="What to show in the Top processes memory column">
+          <option value="percent">Percent only</option>
+          <option value="bytes">Bytes (MB or GB)</option>
+          <option value="both" selected>Percent and bytes</option>
+        </select>
+      </div>
+      <div class="mc-settings-field" id="proc-mem-unit-field">
+        <label for="proc-mem-unit-select" class="mc-settings-label">Memory size units</label>
+        <select id="proc-mem-unit-select" class="mc-theme-select mc-settings-control" aria-label="RSS as megabytes or gigabytes in processes table">
+          <option value="mb">Megabytes (MB)</option>
+          <option value="gb">Gigabytes (GB)</option>
+        </select>
+      </div>
+      <fieldset class="mc-settings-fieldset">
+        <legend class="mc-settings-legend">Visible panels</legend>
+        <div id="panel-visibility-checks" class="mc-settings-checks"></div>
+      </fieldset>
+      <div class="mc-settings-field">
+        <label for="update-interval-select" class="mc-settings-label">Update interval</label>
+        <select id="update-interval-select" class="mc-theme-select mc-settings-control" aria-label="Seconds between live metric updates">
+          <option value="0.25">0.25 s</option>
+          <option value="0.5">0.5 s</option>
+          <option value="1" selected>1 s</option>
+          <option value="2">2 s</option>
+          <option value="5">5 s</option>
+          <option value="10">10 s</option>
+        </select>
+      </div>
+    </div>
+  </aside>
+
+  <main class="mc-grid">
+    <section class="panel panel-wide" data-panel-id="compute" aria-labelledby="panel-title-compute">
+      <div class="panel-head">
+        <button type="button" class="panel-drag" draggable="true" aria-label="Drag to reorder section" title="Drag to reorder">≡</button>
+        <h2 id="panel-title-compute" class="panel-title">Compute</h2>
+        <button type="button" class="panel-collapse" aria-expanded="true" aria-controls="panel-body-compute">−</button>
+      </div>
+      <div class="panel-body" id="panel-body-compute">
+        <div class="tiles">
+          <div class="tile">
+            <div class="tile-label">CPU</div>
+            <div id="cpu-value" class="tile-value">—</div>
+            <div id="cpu-load" class="tile-meta">load —</div>
+            <div class="bar"><div id="cpu-bar" class="bar-fill bar-cpu"></div></div>
+          </div>
+          <div class="tile">
+            <div class="tile-label">Memory</div>
+            <div id="mem-value" class="tile-value">—</div>
+            <div id="mem-meta" class="tile-meta">—</div>
+            <div class="bar"><div id="mem-bar" class="bar-fill bar-mem"></div></div>
+          </div>
+          <div class="tile">
+            <div class="tile-label">Swap</div>
+            <div id="swap-value" class="tile-value">—</div>
+            <div id="swap-meta" class="tile-meta">—</div>
+            <div class="bar"><div id="swap-bar" class="bar-fill bar-swap"></div></div>
+          </div>
+          <div class="tile">
+            <div class="tile-label">Uptime</div>
+            <div id="uptime-value" class="tile-value">—</div>
+            <div id="os-meta" class="tile-meta">—</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel panel-wide" data-panel-id="operations" aria-labelledby="panel-title-operations">
+      <div class="panel-head">
+        <button type="button" class="panel-drag" draggable="true" aria-label="Drag to reorder section" title="Drag to reorder">≡</button>
+        <h2 id="panel-title-operations" class="panel-title">Operations</h2>
+        <button type="button" class="panel-collapse" aria-expanded="true" aria-controls="panel-body-operations">−</button>
+      </div>
+      <div class="panel-body" id="panel-body-operations">
+        <div id="ops-block" class="ops">
+          <div id="systemd-row" class="ops-row">Systemd failed: —</div>
+          <div class="ops-apt-block">
+            <div class="ops-row ops-apt-head">
+              <span id="apt-summary" class="ops-apt-summary-text">APT upgradable: —</span>
+              <button type="button" id="apt-packages-toggle" class="ops-apt-toggle" hidden aria-expanded="false" aria-controls="apt-packages-detail">Show packages</button>
+            </div>
+            <div id="apt-packages-detail" class="ops-apt-detail" hidden>
+              <div class="proc-toolbar ops-apt-toolbar">
+                <label class="proc-field">
+                  <span class="proc-field-label">Search</span>
+                  <input type="search" id="apt-packages-search" class="proc-input" placeholder="Package name…" autocomplete="off" spellcheck="false" aria-label="Filter upgradable packages by name" />
+                </label>
+              </div>
+              <div id="apt-packages-table-host" class="table-wrap ops-apt-table-wrap"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel panel-wide" data-panel-id="storage" aria-labelledby="panel-title-storage">
+      <div class="panel-head">
+        <button type="button" class="panel-drag" draggable="true" aria-label="Drag to reorder section" title="Drag to reorder">≡</button>
+        <h2 id="panel-title-storage" class="panel-title">Storage</h2>
+        <button type="button" class="panel-collapse" aria-expanded="true" aria-controls="panel-body-storage">−</button>
+      </div>
+      <div class="panel-body" id="panel-body-storage">
+        <div id="disk-table" class="table-wrap"></div>
+      </div>
+    </section>
+
+    <section class="panel panel-wide" data-panel-id="network" aria-labelledby="panel-title-network">
+      <div class="panel-head">
+        <button type="button" class="panel-drag" draggable="true" aria-label="Drag to reorder section" title="Drag to reorder">≡</button>
+        <h2 id="panel-title-network" class="panel-title">Network</h2>
+        <button type="button" class="panel-collapse" aria-expanded="true" aria-controls="panel-body-network">−</button>
+      </div>
+      <div class="panel-body" id="panel-body-network">
+        <div id="net-table" class="table-wrap"></div>
+      </div>
+    </section>
+
+    <section class="panel panel-wide" data-panel-id="processes" aria-labelledby="panel-title-processes">
+      <div class="panel-head">
+        <button type="button" class="panel-drag" draggable="true" aria-label="Drag to reorder section" title="Drag to reorder">≡</button>
+        <h2 id="panel-title-processes" class="panel-title">Top processes</h2>
+        <button type="button" class="panel-collapse" aria-expanded="true" aria-controls="panel-body-processes">−</button>
+      </div>
+      <div class="panel-body" id="panel-body-processes">
+        <div class="proc-toolbar">
+          <label class="proc-field">
+            <span class="proc-field-label">Search</span>
+            <input type="search" id="proc-search" class="proc-input" placeholder="Process name…" autocomplete="off" spellcheck="false" />
+          </label>
+          <label class="proc-field">
+            <span class="proc-field-label">Show</span>
+            <select id="proc-limit" class="proc-select" aria-label="Number of processes to show">
+              <option value="10">10</option>
+              <option value="12" selected>12</option>
+              <option value="25">25</option>
+              <option value="50">50</option>
+              <option value="100">100</option>
+              <option value="200">200</option>
+            </select>
+          </label>
+        </div>
+        <div id="proc-table" class="table-wrap"></div>
+      </div>
+    </section>
+  </main>
+
+  <script src="/assets/app.js" defer></script>
+</body>
+</html>

@@ -1,0 +1,42 @@
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Bytecode & caches
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Build / packaging
+build/
+dist/
+*.egg-info/
+*.egg
+.eggs/
+pip-wheel-metadata/
+wheels/
+
+# Environment & secrets
+.env
+.env.*
+!.env.example
+
+# Editors & OS
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Logs & runtime
+*.log
+uvicorn*.log
