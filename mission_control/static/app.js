@@ -566,6 +566,7 @@ function refreshAllSettingsFromStorage() {
   loadPanelCollapsed();
 
   loadProcSortKeyDir();
+  loadDiskSortKeyDir();
   applyProcPrefsToForm();
 
   aptPackagesExpanded = loadAptPackagesExpanded();
@@ -580,6 +581,7 @@ function refreshAllSettingsFromStorage() {
 
   connectMetricsStream();
   renderProcsTable();
+  renderDisks(lastDisks);
   renderAptPackagesTable();
   syncAptPackagesVisibility();
 }
@@ -814,6 +816,393 @@ function diskClass(pct) {
   return "";
 }
 
+const DISK_SORT_KEYDIR_KEY = "mc-disk-sort-keydir";
+
+/** @type {"device"|"mountpoint"|"fstype"|"percent"|"used"|"free"|"total"|"inode_percent"} */
+let diskSortColumn = "mountpoint";
+/** @type {"asc"|"desc"} */
+let diskSortDir = "asc";
+
+function normalizeDiskSortColumn(k) {
+  const allowed = [
+    "mountpoint",
+    "device",
+    "fstype",
+    "percent",
+    "used",
+    "free",
+    "total",
+    "inode_percent",
+  ];
+  return allowed.includes(k) ? k : "mountpoint";
+}
+
+function loadDiskSortKeyDir() {
+  try {
+    const raw = localStorage.getItem(DISK_SORT_KEYDIR_KEY);
+    if (raw) {
+      const o = JSON.parse(raw);
+      if (o && typeof o === "object") {
+        diskSortColumn = normalizeDiskSortColumn(o.column || o.key);
+        diskSortDir = o.dir === "desc" ? "desc" : "asc";
+      }
+    }
+  } catch (_) {
+    /* ignore */
+  }
+}
+
+function saveDiskSortKeyDir() {
+  try {
+    localStorage.setItem(
+      DISK_SORT_KEYDIR_KEY,
+      JSON.stringify({ column: diskSortColumn, dir: diskSortDir })
+    );
+  } catch (_) {
+    /* ignore */
+  }
+}
+
+function onDiskColumnHeaderClick(key) {
+  const k = normalizeDiskSortColumn(key);
+  if (diskSortColumn === k) {
+    diskSortDir = diskSortDir === "asc" ? "desc" : "asc";
+  } else {
+    diskSortColumn = k;
+    diskSortDir =
+      k === "mountpoint" || k === "device" || k === "fstype" ? "asc" : "desc";
+  }
+  saveDiskSortKeyDir();
+  renderDisks(lastDisks);
+}
+
+function diskSortAriaSort(col) {
+  if (diskSortColumn !== col) return "none";
+  return diskSortDir === "asc" ? "ascending" : "descending";
+}
+
+function diskSortArrowHtml(col) {
+  if (diskSortColumn !== col) return "";
+  const ch = diskSortDir === "asc" ? "\u2191" : "\u2193";
+  return ` <span class="proc-sort-ind disk-sort-ind" aria-hidden="true">${ch}</span>`;
+}
+
+function cmpDiskRows(a, b) {
+  const dir = diskSortDir === "asc" ? 1 : -1;
+  let cmp = 0;
+  switch (diskSortColumn) {
+    case "mountpoint":
+      cmp = String(a.mountpoint || "").localeCompare(String(b.mountpoint || ""));
+      break;
+    case "device":
+      cmp = String(a.device || "").localeCompare(String(b.device || ""));
+      break;
+    case "fstype":
+      cmp = String(a.fstype || "").localeCompare(String(b.fstype || ""));
+      break;
+    case "percent":
+      cmp = (Number(a.percent) || 0) - (Number(b.percent) || 0);
+      break;
+    case "used":
+      cmp = (Number(a.used) || 0) - (Number(b.used) || 0);
+      break;
+    case "free":
+      cmp = (Number(a.free) || 0) - (Number(b.free) || 0);
+      break;
+    case "total":
+      cmp = (Number(a.total) || 0) - (Number(b.total) || 0);
+      break;
+    case "inode_percent": {
+      const ai = a.inode_percent != null ? Number(a.inode_percent) : NaN;
+      const bi = b.inode_percent != null ? Number(b.inode_percent) : NaN;
+      if (!Number.isFinite(ai) && !Number.isFinite(bi)) cmp = 0;
+      else if (!Number.isFinite(ai)) cmp = 1;
+      else if (!Number.isFinite(bi)) cmp = -1;
+      else cmp = ai - bi;
+      break;
+    }
+    default:
+      cmp = 0;
+  }
+  if (cmp !== 0) return dir * cmp;
+  return String(a.mountpoint || "").localeCompare(String(b.mountpoint || ""));
+}
+
+let lastDisks = [];
+
+function initDiskSortHeaderClicks() {
+  const host = document.getElementById("panel-body-storage");
+  if (!host || host.dataset.diskSortBound === "1") return;
+  host.dataset.diskSortBound = "1";
+  host.addEventListener("click", (e) => {
+    const th = e.target.closest("th.disk-sortable[data-sort-key]");
+    if (!th || !host.contains(th)) return;
+    onDiskColumnHeaderClick(th.getAttribute("data-sort-key") || "");
+  });
+  host.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter" && e.key !== " ") return;
+    const th = e.target.closest("th.disk-sortable[data-sort-key]");
+    if (!th || !host.contains(th)) return;
+    e.preventDefault();
+    onDiskColumnHeaderClick(th.getAttribute("data-sort-key") || "");
+  });
+}
+
+function initDiskRowClicks() {
+  const wrap = document.getElementById("disk-table");
+  if (!wrap || wrap.dataset.diskRowDetailBound === "1") return;
+  wrap.dataset.diskRowDetailBound = "1";
+  wrap.addEventListener("click", (e) => {
+    const tr = e.target.closest("tbody tr.disk-row-detail");
+    if (!tr || !wrap.contains(tr)) return;
+    const enc = tr.getAttribute("data-mp") || "";
+    let mp = "";
+    try {
+      mp = decodeURIComponent(enc);
+    } catch (_) {
+      return;
+    }
+    if (!mp) return;
+    openDiskDetailModal(mp);
+  });
+  wrap.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter" && e.key !== " ") return;
+    const tr = e.target.closest("tbody tr.disk-row-detail");
+    if (!tr || !wrap.contains(tr)) return;
+    e.preventDefault();
+    const enc = tr.getAttribute("data-mp") || "";
+    let mp = "";
+    try {
+      mp = decodeURIComponent(enc);
+    } catch (_) {
+      return;
+    }
+    if (!mp) return;
+    openDiskDetailModal(mp);
+  });
+}
+
+function initStoragePanel() {
+  loadDiskSortKeyDir();
+  initDiskSortHeaderClicks();
+  initDiskRowClicks();
+}
+
+const DISK_DETAIL_PRIORITY = [
+  "mountpoint",
+  "device",
+  "fstype",
+  "mount_options",
+  "total",
+  "used",
+  "free",
+  "percent",
+  "inode_percent",
+  "statvfs",
+  "ts",
+];
+
+function formatDiskDetailScalar(key, val) {
+  if (val == null) return "—";
+  if (key === "total" || key === "used" || key === "free") {
+    if (typeof val === "number" && Number.isFinite(val)) return formatBytes(val);
+  }
+  if (key === "percent" || key === "inode_percent") {
+    if (typeof val === "number" && Number.isFinite(val)) return `${val.toFixed(1)}%`;
+  }
+  if (key === "ts" && typeof val === "number") {
+    try {
+      return `${val} (${new Date(val * 1000).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "medium" })})`;
+    } catch (_) {
+      return String(val);
+    }
+  }
+  if (key === "statvfs" && val && typeof val === "object") {
+    try {
+      return JSON.stringify(val, null, 2);
+    } catch (_) {
+      return String(val);
+    }
+  }
+  if (typeof val === "object") {
+    try {
+      return JSON.stringify(val);
+    } catch (_) {
+      return String(val);
+    }
+  }
+  return String(val);
+}
+
+function renderDiskDetailHtml(data) {
+  if (!data) return "<p class=\"tile-meta\">No data.</p>";
+  const skipRest = new Set(["error"]);
+  const shown = new Set();
+  let html = "<dl class=\"proc-detail-dl\">";
+  for (const k of DISK_DETAIL_PRIORITY) {
+    if (!Object.prototype.hasOwnProperty.call(data, k)) continue;
+    const v = data[k];
+    if (v == null && k !== "percent") continue;
+    if (k === "statvfs" && v && typeof v === "object") {
+      shown.add(k);
+      html += `<dt>${escapeHtml(k)}</dt><dd><pre class="proc-detail-json proc-detail-json-inline">${escapeHtml(
+        formatDiskDetailScalar(k, v)
+      )}</pre></dd>`;
+      continue;
+    }
+    shown.add(k);
+    html += `<dt>${escapeHtml(k)}</dt><dd>${escapeHtml(formatDiskDetailScalar(k, v))}</dd>`;
+  }
+  const restKeys = Object.keys(data).filter((k) => !shown.has(k) && !skipRest.has(k));
+  restKeys.sort();
+  for (const k of restKeys) {
+    const v = data[k];
+    if (v == null) continue;
+    html += `<dt>${escapeHtml(k)}</dt><dd>${escapeHtml(formatDiskDetailScalar(k, v))}</dd>`;
+  }
+  html += "</dl>";
+  html +=
+    "<details class=\"proc-detail-raw\"><summary>All fields (JSON)</summary>" +
+    `<pre class="proc-detail-json">${escapeHtml(JSON.stringify(data, null, 2))}</pre></details>`;
+  return html;
+}
+
+function closeDiskDetailModal() {
+  const backdrop = document.getElementById("disk-detail-backdrop");
+  const dialog = document.getElementById("disk-detail-dialog");
+  if (backdrop) {
+    backdrop.hidden = true;
+    backdrop.setAttribute("aria-hidden", "true");
+  }
+  if (dialog) {
+    dialog.hidden = true;
+    dialog.setAttribute("aria-hidden", "true");
+  }
+}
+
+function openDiskDetailModal(mountpoint) {
+  const backdrop = document.getElementById("disk-detail-backdrop");
+  const dialog = document.getElementById("disk-detail-dialog");
+  const body = document.getElementById("disk-detail-body");
+  const title = document.getElementById("disk-detail-title");
+  if (!backdrop || !dialog || !body || !title) return;
+
+  title.textContent = mountpoint;
+  body.innerHTML = "<p class=\"tile-meta\">Loading…</p>";
+  backdrop.hidden = false;
+  dialog.hidden = false;
+  backdrop.setAttribute("aria-hidden", "false");
+  dialog.setAttribute("aria-hidden", "false");
+
+  document.getElementById("disk-detail-close")?.focus();
+
+  const q = encodeURIComponent(mountpoint);
+  fetch(`/api/mount?mountpoint=${q}`)
+    .then((res) => {
+      if (res.status === 404) throw new Error("Mount not available.");
+      if (!res.ok) throw new Error(`Request failed (${res.status}).`);
+      return res.json();
+    })
+    .then((d) => {
+      title.textContent = d.mountpoint || mountpoint;
+      body.innerHTML = renderDiskDetailHtml(d);
+    })
+    .catch((err) => {
+      title.textContent = mountpoint;
+      body.innerHTML = `<p class="tile-meta">${escapeHtml(err.message || String(err))}</p>`;
+    });
+}
+
+function initDiskDetailModal() {
+  const backdrop = document.getElementById("disk-detail-backdrop");
+  const closeBtn = document.getElementById("disk-detail-close");
+  closeBtn?.addEventListener("click", closeDiskDetailModal);
+  backdrop?.addEventListener("click", closeDiskDetailModal);
+}
+
+function initModalEscapeToClose() {
+  if (initModalEscapeToClose.done) return;
+  initModalEscapeToClose.done = true;
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape") return;
+    const diskDlg = document.getElementById("disk-detail-dialog");
+    if (diskDlg && !diskDlg.hidden) {
+      closeDiskDetailModal();
+      return;
+    }
+    const procDlg = document.getElementById("proc-detail-dialog");
+    if (procDlg && !procDlg.hidden) closeProcessDetailModal();
+  });
+}
+initModalEscapeToClose.done = false;
+
+function renderDisks(disks) {
+  lastDisks = Array.isArray(disks) ? disks : [];
+  const wrap = document.getElementById("disk-table");
+  if (!wrap) return;
+  if (!lastDisks.length) {
+    wrap.innerHTML = "<p class=\"tile-meta\">No mounts</p>";
+    return;
+  }
+  const list = [...lastDisks].sort(cmpDiskRows);
+  let sumUsed = 0;
+  let sumFree = 0;
+  let sumTotal = 0;
+  for (const d of list) {
+    const u = Number(d.used);
+    const f = Number(d.free);
+    const t = Number(d.total);
+    if (Number.isFinite(u)) sumUsed += u;
+    if (Number.isFinite(f)) sumFree += f;
+    if (Number.isFinite(t)) sumTotal += t;
+  }
+  const aggPct = sumTotal > 0 ? (100 * sumUsed) / sumTotal : NaN;
+  const aggPctDisp = Number.isFinite(aggPct) ? `${aggPct.toFixed(1)}%` : "—";
+  const aggPctClass = Number.isFinite(aggPct) ? diskClass(aggPct) : "";
+  const foot = `<tfoot><tr class="disk-tfoot-row">
+      <td class="disk-td-path disk-tfoot-label" colspan="3">Total · ${list.length} mounts</td>
+      <td class="disk-td-metric disk-tfoot-metric ${aggPctClass}">${aggPctDisp}</td>
+      <td class="disk-td-metric disk-tfoot-metric">${escapeHtml(formatBytes(sumUsed))}</td>
+      <td class="disk-td-metric disk-tfoot-metric">${escapeHtml(formatBytes(sumFree))}</td>
+      <td class="disk-td-metric disk-tfoot-metric">${escapeHtml(formatBytes(sumTotal))}</td>
+      <td class="disk-td-metric disk-td-inode disk-tfoot-metric">—</td>
+    </tr></tfoot>`;
+  const rows = list
+    .map((d) => {
+      const pctRaw = Number(d.percent);
+      const pct = Number.isFinite(pctRaw) ? pctRaw : 0;
+      const enc = encodeURIComponent(d.mountpoint || "");
+      const inodeStr =
+        d.inode_percent != null ? `${Number(d.inode_percent).toFixed(1)}%` : "—";
+      return `<tr class="disk-row-detail" role="button" tabindex="0" data-mp="${enc}" title="Mount details" aria-label="Open details for mount ${escapeHtml(d.mountpoint)}"><td class="disk-td-path">${escapeHtml(
+        d.mountpoint
+      )}</td><td class="disk-td-str" title="${escapeHtml(d.device || "")}">${escapeHtml(
+        d.device || "—"
+      )}</td><td class="disk-td-str">${escapeHtml(
+        d.fstype || ""
+      )}</td><td class="disk-td-metric ${diskClass(pct)}">${pct.toFixed(
+        1
+      )}%</td><td class="disk-td-metric">${formatBytes(
+        d.used
+      )}</td><td class="disk-td-metric">${formatBytes(
+        d.free
+      )}</td><td class="disk-td-metric">${formatBytes(
+        d.total
+      )}</td><td class="disk-td-metric disk-td-inode">${inodeStr}</td></tr>`;
+    })
+    .join("");
+  wrap.innerHTML = `<table class="mc-table mc-table-disk" aria-label="Storage mounts"><thead><tr>
+      <th class="disk-th disk-sortable" scope="col" data-sort-key="mountpoint" role="columnheader" tabindex="0" aria-sort="${diskSortAriaSort("mountpoint")}">Mount${diskSortArrowHtml("mountpoint")}</th>
+      <th class="disk-th disk-sortable" scope="col" data-sort-key="device" role="columnheader" tabindex="0" aria-sort="${diskSortAriaSort("device")}">Device${diskSortArrowHtml("device")}</th>
+      <th class="disk-th disk-sortable" scope="col" data-sort-key="fstype" role="columnheader" tabindex="0" aria-sort="${diskSortAriaSort("fstype")}">FS${diskSortArrowHtml("fstype")}</th>
+      <th class="disk-th disk-sortable disk-th-metric" scope="col" data-sort-key="percent" role="columnheader" tabindex="0" aria-sort="${diskSortAriaSort("percent")}">Use${diskSortArrowHtml("percent")}</th>
+      <th class="disk-th disk-sortable disk-th-metric" scope="col" data-sort-key="used" role="columnheader" tabindex="0" aria-sort="${diskSortAriaSort("used")}">Used${diskSortArrowHtml("used")}</th>
+      <th class="disk-th disk-sortable disk-th-metric" scope="col" data-sort-key="free" role="columnheader" tabindex="0" aria-sort="${diskSortAriaSort("free")}">Free${diskSortArrowHtml("free")}</th>
+      <th class="disk-th disk-sortable disk-th-metric" scope="col" data-sort-key="total" role="columnheader" tabindex="0" aria-sort="${diskSortAriaSort("total")}">Total${diskSortArrowHtml("total")}</th>
+      <th class="disk-th disk-sortable disk-th-metric" scope="col" data-sort-key="inode_percent" role="columnheader" tabindex="0" aria-sort="${diskSortAriaSort("inode_percent")}">Inodes${diskSortArrowHtml("inode_percent")}</th>
+    </tr></thead><tbody>${rows}</tbody>${foot}</table>`;
+}
+
 function setText(id, text) {
   const el = document.getElementById(id);
   if (el) el.textContent = text;
@@ -822,30 +1211,6 @@ function setText(id, text) {
 function setBar(id, pct) {
   const el = document.getElementById(id);
   if (el) el.style.width = `${Math.min(100, Math.max(0, pct))}%`;
-}
-
-function renderDisks(disks) {
-  const wrap = document.getElementById("disk-table");
-  if (!wrap) return;
-  if (!disks || !disks.length) {
-    wrap.innerHTML = "<p class=\"tile-meta\">No mounts</p>";
-    return;
-  }
-  const rows = disks
-    .map(
-      (d) =>
-        `<tr><td>${escapeHtml(d.mountpoint)}</td><td>${escapeHtml(
-          d.fstype || ""
-        )}</td><td class="${diskClass(
-          d.percent
-        )}">${d.percent.toFixed(1)}%</td><td>${formatBytes(
-          d.used
-        )}</td><td>${formatBytes(d.total)}</td><td>${
-          d.inode_percent != null ? d.inode_percent.toFixed(1) + "% inodes" : "—"
-        }</td></tr>`
-    )
-    .join("");
-  wrap.innerHTML = `<table class="mc-table"><thead><tr><th>Mount</th><th>FS</th><th>Use</th><th>Used</th><th>Total</th><th>Inodes</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
 
 function renderNet(net) {
@@ -985,8 +1350,6 @@ function renderProcessDetailHtml(data) {
   return html;
 }
 
-let procDetailModalBound = false;
-
 function closeProcessDetailModal() {
   const backdrop = document.getElementById("proc-detail-backdrop");
   const dialog = document.getElementById("proc-detail-dialog");
@@ -1038,15 +1401,6 @@ function initProcessDetailModal() {
   const closeBtn = document.getElementById("proc-detail-close");
   closeBtn?.addEventListener("click", closeProcessDetailModal);
   backdrop?.addEventListener("click", closeProcessDetailModal);
-
-  if (!procDetailModalBound) {
-    procDetailModalBound = true;
-    document.addEventListener("keydown", (e) => {
-      if (e.key !== "Escape") return;
-      const dialog = document.getElementById("proc-detail-dialog");
-      if (dialog && !dialog.hidden) closeProcessDetailModal();
-    });
-  }
 }
 
 function initProcessTableRowClicks() {
@@ -1280,6 +1634,7 @@ const MC_SETTINGS_KEYS = [
   PROC_MEM_DISPLAY_KEY,
   PROC_CPU_SCALE_KEY,
   PROC_SORT_KEYDIR_KEY,
+  DISK_SORT_KEYDIR_KEY,
 ];
 
 const MC_SETTINGS_KEY_SET = new Set(MC_SETTINGS_KEYS);
@@ -1863,9 +2218,12 @@ initProcMemUnitControl();
 initSettingsDrawer();
 initSettingsBackup();
 initProcessDetailModal();
+initDiskDetailModal();
+initModalEscapeToClose();
 initPanelLayout();
 initPanelVisibilityControls();
 initAptPackagesToggle();
+initStoragePanel();
 initProcessControls();
 initUpdateIntervalControl();
 

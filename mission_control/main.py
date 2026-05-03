@@ -11,7 +11,12 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from mission_control.metrics import NetRateState, collect_process_detail, collect_snapshot
+from mission_control.metrics import (
+    NetRateState,
+    collect_mount_detail,
+    collect_process_detail,
+    collect_snapshot,
+)
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
@@ -49,6 +54,15 @@ def metrics(
         process_sample_limit=proc_limit,
     )
     return sample
+
+
+@app.get("/api/mount")
+def mount_detail(mountpoint: str = Query(..., min_length=1)) -> dict:
+    """Usage + statvfs for a mount path (URL-encoded ``mountpoint`` query)."""
+    data = collect_mount_detail(mountpoint)
+    if data is None:
+        raise HTTPException(status_code=404, detail="Mount not available")
+    return data
 
 
 @app.get("/api/process/{pid}")

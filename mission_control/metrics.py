@@ -63,6 +63,68 @@ def _disk_mounts() -> list[dict[str, Any]]:
     return sorted(rows, key=lambda r: r["mountpoint"])
 
 
+def collect_mount_detail(mountpoint: str) -> dict[str, Any] | None:
+    """Live filesystem usage + ``statvfs`` for a mount path, or ``None`` if unavailable."""
+    if not mountpoint or not isinstance(mountpoint, str):
+        return None
+    mp = os.path.normpath(mountpoint.strip())
+    if not mp.startswith("/"):
+        return None
+    try:
+        usage = psutil.disk_usage(mp)
+    except (OSError, PermissionError, TypeError):
+        return None
+
+    part = None
+    try:
+        target = os.path.realpath(mp)
+    except OSError:
+        target = mp
+    for p in psutil.disk_partitions(all=False):
+        try:
+            if os.path.realpath(p.mountpoint) == target:
+                part = p
+                break
+        except OSError:
+            continue
+
+    out: dict[str, Any] = {
+        "mountpoint": mp,
+        "ts": time.time(),
+        "device": part.device if part else None,
+        "fstype": part.fstype if part else None,
+        "mount_options": part.opts if part else None,
+        "total": int(usage.total),
+        "used": int(usage.used),
+        "free": int(usage.free),
+        "percent": round(float(usage.percent), 1),
+    }
+
+    try:
+        sv = os.statvfs(mp)
+    except OSError:
+        sv = None
+
+    if sv is not None:
+        out["statvfs"] = {
+            "f_bsize": sv.f_bsize,
+            "f_frsize": sv.f_frsize,
+            "f_blocks": sv.f_blocks,
+            "f_bfree": sv.f_bfree,
+            "f_bavail": sv.f_bavail,
+            "f_files": sv.f_files,
+            "f_ffree": sv.f_ffree,
+            "f_favail": getattr(sv, "f_favail", sv.f_ffree),
+            "f_namemax": sv.f_namemax,
+        }
+        if sv.f_files:
+            out["inode_percent"] = round(
+                100.0 * (1.0 - sv.f_favail / max(sv.f_files, 1)), 1
+            )
+
+    return out
+
+
 def _net_io() -> dict[str, Any]:
     now = time.time()
     counters = psutil.net_io_counters(pernic=True)

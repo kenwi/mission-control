@@ -891,6 +891,82 @@ table.mc-table.mc-table-procs {
   outline-offset: -2px;
 }
 
+.mc-table-disk th.disk-sortable {
+  cursor: pointer;
+  user-select: none;
+}
+
+.mc-table-disk th.disk-sortable:hover {
+  color: var(--text);
+}
+
+.mc-table-disk .disk-th-metric,
+.mc-table-disk .disk-td-metric {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.mc-table-disk .disk-td-path {
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 14rem;
+}
+
+.mc-table-disk .disk-td-str {
+  text-align: left;
+  font-size: 0.88em;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 12rem;
+}
+
+.mc-table-disk tbody tr.disk-row-detail {
+  cursor: pointer;
+}
+
+.mc-table-disk tbody tr.disk-row-detail:hover {
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+}
+
+.mc-table-disk tbody tr.disk-row-detail:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  outline-offset: -2px;
+}
+
+.mc-table-disk tfoot .disk-tfoot-row td {
+  border-bottom: none;
+}
+
+.mc-table-disk .disk-tfoot-label {
+  padding-top: 0.55rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.mc-table-disk .disk-tfoot-metric {
+  padding-top: 0.55rem;
+  border-top: 1px solid var(--border);
+}
+
+.mc-table-disk .disk-tfoot-row .disk-tfoot-label {
+  border-top: 1px solid var(--border);
+}
+
+.proc-detail-json-inline {
+  margin: 0;
+  font-size: 0.78rem;
+  max-height: 14rem;
+  overflow: auto;
+}
+
 .mc-theme-toast {
   position: fixed;
   left: 50%;
