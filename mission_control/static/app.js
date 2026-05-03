@@ -316,6 +316,7 @@ const PANEL_COLLAPSED_KEY = "mc-panel-collapsed";
 const STORAGE_DISK_IO_COLLAPSED_KEY = "mc-storage-disk-io-collapsed";
 const THERMAL_FANS_COLLAPSED_KEY = "mc-thermal-fans-collapsed";
 const NETWORK_INTERFACES_COLLAPSED_KEY = "mc-network-interfaces-collapsed";
+const NETWORK_LISTEN_PORTS_COLLAPSED_KEY = "mc-network-listen-ports-collapsed";
 const STORAGE_MOUNTS_COLLAPSED_KEY = "mc-storage-mounts-collapsed";
 const STORAGE_ZFS_COLLAPSED_KEY = "mc-storage-zfs-collapsed";
 
@@ -729,8 +730,9 @@ function refreshAllSettingsFromStorage() {
   loadProcSortKeyDir();
   loadDiskSortKeyDir();
   loadNetSortKeyDir();
-  loadDiskIoSortKeyDir();
+  loadListenPortsSortKeyDir();
   loadThermalSortKeyDir();
+  loadFanSortKeyDir();
   applyStorageDiskIoCollapsed();
   applySubsectionCollapsed(
     THERMAL_SENSORS_COLLAPSED_KEY,
@@ -752,6 +754,13 @@ function refreshAllSettingsFromStorage() {
     "net-interfaces-body",
     "Expand Interfaces",
     "Collapse Interfaces"
+  );
+  applySubsectionCollapsed(
+    NETWORK_LISTEN_PORTS_COLLAPSED_KEY,
+    "net-listen-ports-subsection",
+    "net-listen-ports-body",
+    "Expand Listening ports",
+    "Collapse Listening ports"
   );
   applySubsectionCollapsed(
     STORAGE_MOUNTS_COLLAPSED_KEY,
@@ -802,6 +811,7 @@ function refreshAllSettingsFromStorage() {
   renderDisks(lastDisks);
   renderZfsPools(lastZfsPools);
   renderNet(lastNetwork);
+  renderListeningPorts(lastListeningPorts);
   renderDiskIo(lastDiskIo);
   renderThermal(lastThermal);
   renderFans(lastFans);
@@ -1218,6 +1228,7 @@ function cmpDiskRows(a, b) {
 let lastDisks = [];
 let lastZfsPools = [];
 let lastNetwork = null;
+let lastListeningPorts = null;
 let lastDiskIo = null;
 let lastThermal = null;
 let lastFans = null;
@@ -2317,11 +2328,17 @@ function setBar(id, pct) {
 }
 
 const NET_SORT_KEYDIR_KEY = "mc-net-sort-keydir";
+const LISTEN_PORTS_SORT_KEYDIR_KEY = "mc-listen-ports-sort-keydir";
 
 /** @type {"iface"|"ip"|"down"|"up"|"rx"|"tx"} */
 let netSortColumn = "iface";
 /** @type {"asc"|"desc"} */
 let netSortDir = "asc";
+
+/** @type {"proto"|"family"|"lip"|"port"|"pid"|"process"|"fd"} */
+let listenPortsSortColumn = "port";
+/** @type {"asc"|"desc"} */
+let listenPortsSortDir = "asc";
 
 function normalizeNetSortColumn(k) {
   if (k === "down" || k === "up" || k === "iface" || k === "ip" || k === "rx" || k === "tx") return k;
@@ -2416,17 +2433,154 @@ function cmpNetRows(a, b) {
   return String(a.name || "").localeCompare(String(b.name || ""), undefined, { sensitivity: "base" });
 }
 
+function normalizeListenPortsSortColumn(k) {
+  if (
+    k === "proto" ||
+    k === "family" ||
+    k === "lip" ||
+    k === "port" ||
+    k === "pid" ||
+    k === "process" ||
+    k === "fd"
+  ) {
+    return k;
+  }
+  return "port";
+}
+
+function loadListenPortsSortKeyDir() {
+  try {
+    const raw = localStorage.getItem(LISTEN_PORTS_SORT_KEYDIR_KEY);
+    if (raw) {
+      const o = JSON.parse(raw);
+      if (o && typeof o === "object") {
+        listenPortsSortColumn = normalizeListenPortsSortColumn(o.column || o.key);
+        listenPortsSortDir = o.dir === "desc" ? "desc" : "asc";
+      }
+    }
+  } catch (_) {
+    /* ignore */
+  }
+}
+
+function saveListenPortsSortKeyDir() {
+  try {
+    localStorage.setItem(
+      LISTEN_PORTS_SORT_KEYDIR_KEY,
+      JSON.stringify({ column: listenPortsSortColumn, dir: listenPortsSortDir })
+    );
+  } catch (_) {
+    /* ignore */
+  }
+}
+
+function defaultDirForListenPortsColumn(col) {
+  if (col === "port" || col === "pid" || col === "fd") return "asc";
+  return "asc";
+}
+
+function onListenPortsColumnHeaderClick(key) {
+  const c = normalizeListenPortsSortColumn(key);
+  if (listenPortsSortColumn === c) {
+    listenPortsSortDir = listenPortsSortDir === "asc" ? "desc" : "asc";
+  } else {
+    listenPortsSortColumn = c;
+    listenPortsSortDir = defaultDirForListenPortsColumn(c);
+  }
+  saveListenPortsSortKeyDir();
+  renderListeningPorts(lastListeningPorts);
+}
+
+function listenPortsSortAriaSort(col) {
+  if (listenPortsSortColumn !== col) return "none";
+  return listenPortsSortDir === "asc" ? "ascending" : "descending";
+}
+
+function listenPortsSortArrowHtml(col) {
+  if (listenPortsSortColumn !== col) return "";
+  const ch = listenPortsSortDir === "asc" ? "\u2191" : "\u2193";
+  return ` <span class="proc-sort-ind" aria-hidden="true">${ch}</span>`;
+}
+
+function cmpListenPortsRows(a, b) {
+  const dir = listenPortsSortDir === "asc" ? 1 : -1;
+  let cmp = 0;
+  switch (listenPortsSortColumn) {
+    case "proto":
+      cmp = String(a.proto || "").localeCompare(String(b.proto || ""), undefined, {
+        sensitivity: "base",
+      });
+      break;
+    case "family":
+      cmp = String(a.family || "").localeCompare(String(b.family || ""), undefined, {
+        sensitivity: "base",
+      });
+      break;
+    case "lip":
+      cmp = String(a.local_ip || "").localeCompare(String(b.local_ip || ""), undefined, {
+        sensitivity: "base",
+        numeric: true,
+      });
+      break;
+    case "port":
+      cmp = (Number(a.local_port) || 0) - (Number(b.local_port) || 0);
+      break;
+    case "pid": {
+      const ap = a.pid;
+      const bp = b.pid;
+      const an = ap != null && Number.isFinite(Number(ap)) ? Number(ap) : NaN;
+      const bn = bp != null && Number.isFinite(Number(bp)) ? Number(bp) : NaN;
+      if (!Number.isFinite(an) && !Number.isFinite(bn)) cmp = 0;
+      else if (!Number.isFinite(an)) cmp = 1;
+      else if (!Number.isFinite(bn)) cmp = -1;
+      else cmp = an - bn;
+      break;
+    }
+    case "process":
+      cmp = String(a.process || "").localeCompare(String(b.process || ""), undefined, {
+        sensitivity: "base",
+      });
+      break;
+    case "fd": {
+      const af = a.fd;
+      const bf = b.fd;
+      const an = af != null && Number.isFinite(Number(af)) ? Number(af) : NaN;
+      const bn = bf != null && Number.isFinite(Number(bf)) ? Number(bf) : NaN;
+      if (!Number.isFinite(an) && !Number.isFinite(bn)) cmp = 0;
+      else if (!Number.isFinite(an)) cmp = 1;
+      else if (!Number.isFinite(bn)) cmp = -1;
+      else cmp = an - bn;
+      break;
+    }
+    default:
+      cmp = 0;
+  }
+  if (cmp !== 0) return dir * cmp;
+  return (Number(a.local_port) || 0) - (Number(b.local_port) || 0);
+}
+
 function initNetSortHeaderClicks() {
   const host = document.getElementById("panel-body-network");
   if (!host || host.dataset.netSortBound === "1") return;
   host.dataset.netSortBound = "1";
   host.addEventListener("click", (e) => {
+    const thPorts = e.target.closest("th.net-ports-sortable[data-sort-key]");
+    if (thPorts && host.contains(thPorts)) {
+      onListenPortsColumnHeaderClick(thPorts.getAttribute("data-sort-key") || "");
+      return;
+    }
     const th = e.target.closest("th.net-sortable[data-sort-key]");
     if (!th || !host.contains(th)) return;
     onNetColumnHeaderClick(th.getAttribute("data-sort-key") || "");
   });
   host.addEventListener("keydown", (e) => {
     if (e.key !== "Enter" && e.key !== " ") return;
+    const thPorts = e.target.closest("th.net-ports-sortable[data-sort-key]");
+    if (thPorts && host.contains(thPorts)) {
+      e.preventDefault();
+      onListenPortsColumnHeaderClick(thPorts.getAttribute("data-sort-key") || "");
+      return;
+    }
     const th = e.target.closest("th.net-sortable[data-sort-key]");
     if (!th || !host.contains(th)) return;
     e.preventDefault();
@@ -2452,6 +2606,7 @@ function initNetRateUnitControl() {
 
 function initNetworkPanel() {
   loadNetSortKeyDir();
+  loadListenPortsSortKeyDir();
   initNetSortHeaderClicks();
   initNetRateUnitControl();
   initNetInterfaceRowClicks();
@@ -2469,6 +2624,22 @@ function initNetworkPanel() {
     "Expand Interfaces",
     "Collapse Interfaces",
     "netIfSubCollapseBound",
+    undefined
+  );
+  applySubsectionCollapsed(
+    NETWORK_LISTEN_PORTS_COLLAPSED_KEY,
+    "net-listen-ports-subsection",
+    "net-listen-ports-body",
+    "Expand Listening ports",
+    "Collapse Listening ports"
+  );
+  initSubsectionCollapse(
+    NETWORK_LISTEN_PORTS_COLLAPSED_KEY,
+    "net-listen-ports-subsection",
+    "net-listen-ports-body",
+    "Expand Listening ports",
+    "Collapse Listening ports",
+    "netListenPortsSubBound",
     undefined
   );
 }
@@ -2513,6 +2684,61 @@ function renderNet(net) {
       <th class="net-th net-sortable net-th-metric" scope="col" data-sort-key="rx" role="columnheader" tabindex="0" aria-sort="${netSortAriaSort("rx")}" title="Bytes received (cumulative since boot)">RX${netSortArrowHtml("rx")}</th>
       <th class="net-th net-sortable net-th-metric" scope="col" data-sort-key="tx" role="columnheader" tabindex="0" aria-sort="${netSortAriaSort("tx")}" title="Bytes sent (cumulative since boot)">TX${netSortArrowHtml("tx")}</th>
     </tr></thead><tbody>${rows}</tbody></table>`;
+}
+
+function renderListeningPorts(data) {
+  const wrap = document.getElementById("net-listen-ports-table");
+  if (!wrap) return;
+  let noteHtml = "";
+  if (data && data.note) {
+    noteHtml = `<p class="tile-meta mc-listen-ports-note">${escapeHtml(data.note)}</p>`;
+  }
+  const rowsArr = data && Array.isArray(data.rows) ? data.rows : [];
+  if (!rowsArr.length) {
+    const emptyMsg = noteHtml
+      ? noteHtml
+      : "<p class=\"tile-meta\">No listening TCP or bound UDP sockets reported.</p>";
+    wrap.innerHTML = emptyMsg;
+    return;
+  }
+  const list = rowsArr.map((r) => ({
+    proto: String(r.proto || "").toLowerCase(),
+    family: String(r.family || ""),
+    local_ip: String(r.local_ip != null ? r.local_ip : ""),
+    local_port: Number(r.local_port),
+    pid: r.pid != null && Number.isFinite(Number(r.pid)) ? Number(r.pid) : null,
+    process: r.process != null ? String(r.process) : null,
+    fd: r.fd != null && Number.isFinite(Number(r.fd)) ? Number(r.fd) : null,
+  }));
+  list.sort(cmpListenPortsRows);
+  const body = list
+    .map((row) => {
+      const lip = row.local_ip || "—";
+      const portDisp =
+        Number.isFinite(row.local_port) && row.local_port > 0 ? String(row.local_port) : "—";
+      const pidDisp = row.pid != null ? String(row.pid) : "—";
+      const procDisp = row.process != null && row.process !== "" ? row.process : "—";
+      const fdDisp = row.fd != null ? String(row.fd) : "—";
+      return `<tr><td class="net-port-td">${escapeHtml(row.proto)}</td><td class="net-port-td">${escapeHtml(
+        row.family
+      )}</td><td class="net-port-td-ip" title="${escapeHtml(lip)}">${escapeHtml(
+        lip
+      )}</td><td class="net-port-td-num">${escapeHtml(portDisp)}</td><td class="net-port-td-num">${escapeHtml(
+        pidDisp
+      )}</td><td class="net-port-td-proc" title="${escapeHtml(procDisp)}">${escapeHtml(
+        procDisp
+      )}</td><td class="net-port-td-num" title="File descriptor">${escapeHtml(fdDisp)}</td></tr>`;
+    })
+    .join("");
+  wrap.innerHTML = `${noteHtml}<table class="mc-table mc-table-net-ports" aria-label="Listening ports"><thead><tr>
+      <th class="net-port-th net-ports-sortable" scope="col" data-sort-key="proto" role="columnheader" tabindex="0" aria-sort="${listenPortsSortAriaSort("proto")}">Proto${listenPortsSortArrowHtml("proto")}</th>
+      <th class="net-port-th net-ports-sortable" scope="col" data-sort-key="family" role="columnheader" tabindex="0" aria-sort="${listenPortsSortAriaSort("family")}">Family${listenPortsSortArrowHtml("family")}</th>
+      <th class="net-port-th net-ports-sortable net-port-th-ip" scope="col" data-sort-key="lip" role="columnheader" tabindex="0" aria-sort="${listenPortsSortAriaSort("lip")}">Local IP${listenPortsSortArrowHtml("lip")}</th>
+      <th class="net-port-th net-ports-sortable net-port-th-num" scope="col" data-sort-key="port" role="columnheader" tabindex="0" aria-sort="${listenPortsSortAriaSort("port")}">Port${listenPortsSortArrowHtml("port")}</th>
+      <th class="net-port-th net-ports-sortable net-port-th-num" scope="col" data-sort-key="pid" role="columnheader" tabindex="0" aria-sort="${listenPortsSortAriaSort("pid")}">PID${listenPortsSortArrowHtml("pid")}</th>
+      <th class="net-port-th net-ports-sortable net-port-th-proc" scope="col" data-sort-key="process" role="columnheader" tabindex="0" aria-sort="${listenPortsSortAriaSort("process")}">Process${listenPortsSortArrowHtml("process")}</th>
+      <th class="net-port-th net-ports-sortable net-port-th-num" scope="col" data-sort-key="fd" role="columnheader" tabindex="0" title="File descriptor" aria-sort="${listenPortsSortAriaSort("fd")}">FD${listenPortsSortArrowHtml("fd")}</th>
+    </tr></thead><tbody>${body}</tbody></table>`;
 }
 
 const DISK_IO_SORT_KEYDIR_KEY = "mc-disk-io-sort-keydir";
@@ -2709,12 +2935,18 @@ function renderDiskIo(dio) {
 }
 
 const THERMAL_SORT_KEYDIR_KEY = "mc-thermal-sort-keydir";
+const FAN_SORT_KEYDIR_KEY = "mc-fan-sort-keydir";
 const THERMAL_SENSORS_COLLAPSED_KEY = "mc-thermal-sensors-collapsed";
 
 /** @type {"name"|"temp"} */
 let thermalSortColumn = "name";
 /** @type {"asc"|"desc"} */
 let thermalSortDir = "asc";
+
+/** @type {"name"|"rpm"} */
+let fanSortColumn = "name";
+/** @type {"asc"|"desc"} */
+let fanSortDir = "asc";
 
 function normalizeThermalSortColumn(k) {
   if (k === "name" || k === "temp") return k;
@@ -2802,21 +3034,124 @@ function cmpThermalRows(a, b) {
   return String(a.name || "").localeCompare(String(b.name || ""), undefined, { sensitivity: "base" });
 }
 
+function normalizeFanSortColumn(k) {
+  if (k === "name" || k === "rpm") return k;
+  return "name";
+}
+
+function loadFanSortKeyDir() {
+  try {
+    const raw = localStorage.getItem(FAN_SORT_KEYDIR_KEY);
+    if (raw) {
+      const o = JSON.parse(raw);
+      if (o && typeof o === "object") {
+        fanSortColumn = normalizeFanSortColumn(o.column || o.key);
+        fanSortDir = o.dir === "desc" ? "desc" : "asc";
+      }
+    }
+  } catch (_) {
+    /* ignore */
+  }
+}
+
+function saveFanSortKeyDir() {
+  try {
+    localStorage.setItem(
+      FAN_SORT_KEYDIR_KEY,
+      JSON.stringify({ column: fanSortColumn, dir: fanSortDir })
+    );
+  } catch (_) {
+    /* ignore */
+  }
+}
+
+function defaultDirForFanColumn(col) {
+  if (col === "name") return "asc";
+  return "desc";
+}
+
+function onFanColumnHeaderClick(key) {
+  const c = normalizeFanSortColumn(key);
+  if (fanSortColumn === c) {
+    fanSortDir = fanSortDir === "asc" ? "desc" : "asc";
+  } else {
+    fanSortColumn = c;
+    fanSortDir = defaultDirForFanColumn(c);
+  }
+  saveFanSortKeyDir();
+  renderFans(lastFans);
+}
+
+function fanSortAriaSort(col) {
+  if (fanSortColumn !== col) return "none";
+  return fanSortDir === "asc" ? "ascending" : "descending";
+}
+
+function fanSortArrowHtml(col) {
+  if (fanSortColumn !== col) return "";
+  const ch = fanSortDir === "asc" ? "\u2191" : "\u2193";
+  return ` <span class="proc-sort-ind" aria-hidden="true">${ch}</span>`;
+}
+
+function cmpFanRows(a, b) {
+  const dir = fanSortDir === "asc" ? 1 : -1;
+  let cmp = 0;
+  switch (fanSortColumn) {
+    case "name":
+      cmp = String(a.name || "").localeCompare(String(b.name || ""), undefined, {
+        sensitivity: "base",
+        numeric: true,
+      });
+      break;
+    case "rpm": {
+      const ar = Number(a.rpm);
+      const br = Number(b.rpm);
+      const af = Number.isFinite(ar) ? ar : NaN;
+      const bf = Number.isFinite(br) ? br : NaN;
+      if (!Number.isFinite(af) && !Number.isFinite(bf)) cmp = 0;
+      else if (!Number.isFinite(af)) cmp = 1;
+      else if (!Number.isFinite(bf)) cmp = -1;
+      else cmp = af - bf;
+      break;
+    }
+    default:
+      cmp = 0;
+  }
+  if (cmp !== 0) return dir * cmp;
+  return String(a.name || "").localeCompare(String(b.name || ""), undefined, {
+    sensitivity: "base",
+    numeric: true,
+  });
+}
+
 function initThermalSortHeaderClicks() {
   const host = document.getElementById("panel-body-thermal");
   if (!host || host.dataset.thermalSortBound === "1") return;
   host.dataset.thermalSortBound = "1";
   host.addEventListener("click", (e) => {
-    const th = e.target.closest("th.thermal-sortable[data-sort-key]");
-    if (!th || !host.contains(th)) return;
-    onThermalColumnHeaderClick(th.getAttribute("data-sort-key") || "");
+    const thThermal = e.target.closest("th.thermal-sortable[data-sort-key]");
+    if (thThermal && host.contains(thThermal)) {
+      onThermalColumnHeaderClick(thThermal.getAttribute("data-sort-key") || "");
+      return;
+    }
+    const thFan = e.target.closest("th.fan-sortable[data-sort-key]");
+    if (thFan && host.contains(thFan)) {
+      onFanColumnHeaderClick(thFan.getAttribute("data-sort-key") || "");
+    }
   });
   host.addEventListener("keydown", (e) => {
     if (e.key !== "Enter" && e.key !== " ") return;
-    const th = e.target.closest("th.thermal-sortable[data-sort-key]");
-    if (!th || !host.contains(th)) return;
-    e.preventDefault();
-    onThermalColumnHeaderClick(th.getAttribute("data-sort-key") || "");
+    const thThermal = e.target.closest("th.thermal-sortable[data-sort-key]");
+    if (thThermal && host.contains(thThermal)) {
+      e.preventDefault();
+      onThermalColumnHeaderClick(thThermal.getAttribute("data-sort-key") || "");
+      return;
+    }
+    const thFan = e.target.closest("th.fan-sortable[data-sort-key]");
+    if (thFan && host.contains(thFan)) {
+      e.preventDefault();
+      onFanColumnHeaderClick(thFan.getAttribute("data-sort-key") || "");
+    }
   });
 }
 
@@ -2906,25 +3241,33 @@ function renderFans(data) {
       const lbl = typeof r.label === "string" ? r.label.trim() : "";
       const name = lbl ? `${chip} ${lbl}` : `${chip} fan ${idx}`;
       const rpm = r.rpm != null ? Number(r.rpm) : NaN;
-      rows.push({ name, rpm: Number.isFinite(rpm) ? rpm : null });
+      const dk = typeof r.detail_key === "string" ? r.detail_key.trim() : "";
+      rows.push({
+        name,
+        rpm: Number.isFinite(rpm) ? rpm : null,
+        detail_key: dk,
+      });
     }
   }
-  rows.sort((a, b) =>
-    String(a.name || "").localeCompare(String(b.name || ""), undefined, {
-      sensitivity: "base",
-      numeric: true,
-    })
-  );
+  rows.sort(cmpFanRows);
   const tr = rows
     .map((row) => {
       const rpmCell =
         row.rpm != null && Number.isFinite(row.rpm) ? escapeHtml(String(row.rpm)) : "—";
-      return `<tr><td class="fan-td-name">${escapeHtml(row.name)}</td><td class="fan-td-rpm">${rpmCell}</td></tr>`;
+      const hasKey = row.detail_key && row.detail_key.length > 0;
+      const rowClass = hasKey ? "fan-row-detail" : "";
+      const roleAttr = hasKey ? ' role="button" tabindex="0"' : "";
+      const titleAttr = hasKey ? ' title="Fan details"' : "";
+      const aria = hasKey
+        ? ` aria-label="Open details for ${escapeHtml(row.name)}"`
+        : "";
+      const dkAttr = hasKey ? ` data-detail-key="${escapeHtml(row.detail_key)}"` : "";
+      return `<tr class="${rowClass}"${roleAttr}${titleAttr}${aria}${dkAttr}><td class="fan-td-name">${escapeHtml(row.name)}</td><td class="fan-td-rpm">${rpmCell}</td></tr>`;
     })
     .join("");
   wrap.innerHTML = `<table class="mc-table mc-table-fans" aria-label="Fan speeds"><thead><tr>
-      <th scope="col">Fan</th>
-      <th scope="col" class="fan-th-rpm">RPM</th>
+      <th class="fan-th fan-sortable" scope="col" data-sort-key="name" role="columnheader" tabindex="0" aria-sort="${fanSortAriaSort("name")}">Fan${fanSortArrowHtml("name")}</th>
+      <th class="fan-th fan-th-rpm fan-sortable fan-th-metric" scope="col" data-sort-key="rpm" role="columnheader" tabindex="0" aria-sort="${fanSortAriaSort("rpm")}">RPM${fanSortArrowHtml("rpm")}</th>
     </tr></thead><tbody>${tr}</tbody></table>`;
 }
 
@@ -2950,10 +3293,34 @@ function initThermalRowClicks() {
   });
 }
 
+function initFanRowClicks() {
+  const wrap = document.getElementById("thermal-fans-table");
+  if (!wrap || wrap.dataset.fanRowBound === "1") return;
+  wrap.dataset.fanRowBound = "1";
+  wrap.addEventListener("click", (e) => {
+    const tr = e.target.closest("tbody tr.fan-row-detail[data-detail-key]");
+    if (!tr || !wrap.contains(tr)) return;
+    const k = tr.getAttribute("data-detail-key") || "";
+    if (!k) return;
+    openFanDetailModal(k, tr.querySelector(".fan-td-name")?.textContent || "");
+  });
+  wrap.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter" && e.key !== " ") return;
+    const tr = e.target.closest("tbody tr.fan-row-detail[data-detail-key]");
+    if (!tr || !wrap.contains(tr)) return;
+    e.preventDefault();
+    const k = tr.getAttribute("data-detail-key") || "";
+    if (!k) return;
+    openFanDetailModal(k, tr.querySelector(".fan-td-name")?.textContent || "");
+  });
+}
+
 function initThermalPanel() {
   loadThermalSortKeyDir();
+  loadFanSortKeyDir();
   initThermalSortHeaderClicks();
   initThermalRowClicks();
+  initFanRowClicks();
   applySubsectionCollapsed(
     THERMAL_SENSORS_COLLAPSED_KEY,
     "thermal-sensors-subsection",
@@ -3062,6 +3429,39 @@ function openThermalDetailModal(detailKey, displayName) {
   fetch(`/api/thermal/detail?key=${q}`)
     .then((res) => {
       if (res.status === 404) throw new Error("Sensor not found.");
+      if (!res.ok) throw new Error(`Request failed (${res.status}).`);
+      return res.json();
+    })
+    .then((d) => {
+      title.textContent = displayName || detailKey;
+      body.innerHTML = renderThermalDetailHtml(d);
+    })
+    .catch((err) => {
+      title.textContent = displayName || detailKey;
+      body.innerHTML = `<p class="tile-meta">${escapeHtml(err.message || String(err))}</p>`;
+    });
+}
+
+function openFanDetailModal(detailKey, displayName) {
+  const backdrop = document.getElementById("thermal-detail-backdrop");
+  const dialog = document.getElementById("thermal-detail-dialog");
+  const body = document.getElementById("thermal-detail-body");
+  const title = document.getElementById("thermal-detail-title");
+  if (!backdrop || !dialog || !body || !title) return;
+
+  title.textContent = displayName || detailKey;
+  body.innerHTML = "<p class=\"tile-meta\">Loading…</p>";
+  backdrop.hidden = false;
+  dialog.hidden = false;
+  backdrop.setAttribute("aria-hidden", "false");
+  dialog.setAttribute("aria-hidden", "false");
+
+  document.getElementById("thermal-detail-close")?.focus();
+
+  const q = encodeURIComponent(detailKey);
+  fetch(`/api/fan/detail?key=${q}`)
+    .then((res) => {
+      if (res.status === 404) throw new Error("Fan sensor not found.");
       if (!res.ok) throw new Error(`Request failed (${res.status}).`);
       return res.json();
     })
@@ -3486,13 +3886,16 @@ const MC_SETTINGS_KEYS = [
   DISK_SORT_KEYDIR_KEY,
   DISK_IO_SORT_KEYDIR_KEY,
   THERMAL_SORT_KEYDIR_KEY,
+  FAN_SORT_KEYDIR_KEY,
   THERMAL_SENSORS_COLLAPSED_KEY,
   THERMAL_FANS_COLLAPSED_KEY,
   NETWORK_INTERFACES_COLLAPSED_KEY,
+  NETWORK_LISTEN_PORTS_COLLAPSED_KEY,
   STORAGE_MOUNTS_COLLAPSED_KEY,
   STORAGE_ZFS_COLLAPSED_KEY,
   NET_RATE_UNIT_KEY,
   NET_SORT_KEYDIR_KEY,
+  LISTEN_PORTS_SORT_KEYDIR_KEY,
   MODAL_WIDTH_KEY,
   CONTENT_LAYOUT_MAX_KEY,
   CONTENT_PADDING_KEY,
@@ -4055,6 +4458,8 @@ function applySnapshot(data) {
   renderZfsPools(lastZfsPools);
   lastNetwork = data.network ?? null;
   renderNet(lastNetwork);
+  lastListeningPorts = data.listening_ports ?? null;
+  renderListeningPorts(lastListeningPorts);
   lastDiskIo = data.disk_io ?? null;
   renderDiskIo(lastDiskIo);
 

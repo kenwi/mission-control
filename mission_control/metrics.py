@@ -6,6 +6,7 @@ import json
 import os
 import re
 import shutil
+import socket
 import subprocess
 import time
 from dataclasses import dataclass
@@ -479,6 +480,138 @@ def _net_io() -> dict[str, Any]:
             if not name.startswith("lo")
         },
     }
+
+
+def _conn_laddr_ip_port(c: Any) -> tuple[str | None, int | None]:
+    la = getattr(c, "laddr", None)
+    if not la:
+        return None, None
+    if hasattr(la, "ip"):
+        ip, port = la.ip, la.port
+    elif isinstance(la, (tuple, list)) and len(la) >= 2:
+        ip, port = la[0], la[1]
+    else:
+        return None, None
+    ip_s = str(ip).strip() if ip is not None and str(ip).strip() else ""
+    if not ip_s:
+        ip_s = "*"
+    try:
+        port_i = int(port)
+    except (TypeError, ValueError):
+        return None, None
+    return ip_s, port_i
+
+
+def _conn_raddr_port(c: Any) -> int | None:
+    ra = getattr(c, "raddr", None)
+    if not ra:
+        return None
+    if hasattr(ra, "port"):
+        p = ra.port
+    elif isinstance(ra, (tuple, list)) and len(ra) >= 2:
+        p = ra[1]
+    else:
+        return None
+    try:
+        return int(p)
+    except (TypeError, ValueError):
+        return None
+
+
+def _listening_ports() -> dict[str, Any]:
+    """TCP listeners and bound UDP sockets from ``psutil.net_connections``."""
+    ts = time.time()
+    out: dict[str, Any] = {"ts": ts, "rows": [], "note": None}
+    try:
+        conns = psutil.net_connections(kind="inet")
+    except psutil.AccessDenied:
+        out["note"] = (
+            "Access denied listing sockets — run with privileges to see all listeners."
+        )
+        return out
+    except (PermissionError, OSError, RuntimeError) as e:
+        out["note"] = str(e)[:240]
+        return out
+
+    rows: list[dict[str, Any]] = []
+    seen: set[tuple[Any, ...]] = set()
+    pid_names: dict[int, str] = {}
+
+    def process_label(pid: int | None) -> str | None:
+        if pid is None:
+            return None
+        if pid in pid_names:
+            return pid_names[pid]
+        try:
+            pid_names[pid] = psutil.Process(pid).name()
+        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+            pid_names[pid] = "—"
+        return pid_names[pid]
+
+    listen_status = getattr(psutil, "CONN_LISTEN", "LISTEN")
+
+    for c in conns:
+        if c.type == socket.SOCK_STREAM:
+            if c.status != listen_status:
+                continue
+        elif c.type == socket.SOCK_DGRAM:
+            rp = _conn_raddr_port(c)
+            if rp is not None and rp > 0:
+                continue
+        else:
+            continue
+
+        lip, port = _conn_laddr_ip_port(c)
+        if port is None or port <= 0:
+            continue
+
+        proto = "tcp" if c.type == socket.SOCK_STREAM else "udp"
+        if c.family == socket.AF_INET6:
+            family_s = "ipv6"
+        elif c.family == socket.AF_INET:
+            family_s = "ipv4"
+        else:
+            family_s = "other"
+
+        fd_val = getattr(c, "fd", None)
+        fd_i: int | None
+        if fd_val is None or fd_val == -1:
+            fd_i = None
+        else:
+            try:
+                fd_i = int(fd_val)
+            except (TypeError, ValueError):
+                fd_i = None
+
+        fd_key = fd_i if fd_i is not None else -1
+        key = (proto, family_s, lip or "", port, c.pid, fd_key)
+        if key in seen:
+            continue
+        seen.add(key)
+
+        rows.append(
+            {
+                "proto": proto,
+                "family": family_s,
+                "local_ip": lip or "*",
+                "local_port": port,
+                "pid": c.pid,
+                "process": process_label(c.pid),
+                "fd": fd_i,
+            }
+        )
+
+    rows.sort(
+        key=lambda r: (
+            r["local_port"],
+            r["proto"],
+            r["family"],
+            r["local_ip"] or "",
+            r["pid"] if r["pid"] is not None else -1,
+        )
+    )
+    out["rows"] = rows
+    return out
 
 
 _IFNAME_RE = re.compile(r"^[a-zA-Z0-9._@-]{1,64}$")
@@ -1397,6 +1530,90 @@ def collect_thermal_detail(detail_key: str) -> dict[str, Any] | None:
     return None
 
 
+_DETAIL_FAN = re.compile(r"^hwmon:(hwmon\d+):(fan\d+)$")
+
+
+def collect_fan_detail(detail_key: str) -> dict[str, Any] | None:
+    """Live sysfs fields for one hwmon fan channel (RPM and related attributes)."""
+    raw = (detail_key or "").strip()
+    m = _DETAIL_FAN.match(raw)
+    if not m:
+        return None
+    hwname, fanidx = m.group(1), m.group(2)
+    base = Path("/sys/class/hwmon") / hwname
+    if not base.is_dir():
+        return None
+    ts = time.time()
+    out: dict[str, Any] = {
+        "kind": "hwmon_fan",
+        "detail_key": raw,
+        "path": str(base),
+        "ts": ts,
+        "fields": {},
+    }
+    nf = base / "name"
+    if nf.is_file():
+        try:
+            out["hwmon_chip_name"] = nf.read_text(encoding="utf-8", errors="replace").strip()
+        except OSError:
+            pass
+    try:
+        for p in sorted(base.glob(f"{fanidx}_*")):
+            if not p.is_file():
+                continue
+            try:
+                txt = p.read_text(encoding="utf-8", errors="replace").strip()
+            except OSError:
+                continue
+            if len(txt) > 4000:
+                txt = txt[:4000] + "…"
+            out["fields"][p.name] = txt
+    except OSError:
+        pass
+    return out
+
+
+_RE_FAN_INPUT = re.compile(r"^(fan\d+)_input$", re.I)
+
+
+def _hwmon_fan_detail_key(chip: str, label: str) -> str | None:
+    """Map psutil chip + label to ``hwmon:hwmonN:fanM`` for sysfs detail lookup."""
+    chip_s = (chip or "").strip()
+    label_s = (label or "").strip()
+    root = Path("/sys/class/hwmon")
+    if not root.is_dir():
+        return None
+    for hw in sorted(root.glob("hwmon*")):
+        name_f = hw / "name"
+        if not name_f.is_file():
+            continue
+        try:
+            hwname = name_f.read_text(encoding="utf-8", errors="replace").strip()
+        except OSError:
+            continue
+        if chip_s and hwname != chip_s and chip_s not in hwname and hwname not in chip_s:
+            continue
+        for inp in sorted(hw.glob("fan*_input")):
+            m = _RE_FAN_INPUT.match(inp.name)
+            if not m:
+                continue
+            stem = m.group(1)
+            label_f = hw / f"{stem}_label"
+            file_lbl = ""
+            if label_f.is_file():
+                try:
+                    file_lbl = label_f.read_text(encoding="utf-8", errors="replace").strip()
+                except OSError:
+                    pass
+            if label_s:
+                if file_lbl != label_s:
+                    continue
+            elif file_lbl:
+                continue
+            return f"hwmon:{hw.name}:{stem}"
+    return None
+
+
 def _thermal_sensors() -> dict[str, Any]:
     """Temperatures from psutil hwmon and ``/sys/class/thermal`` zones."""
     ts = time.time()
@@ -1460,9 +1677,6 @@ def _thermal_sensors() -> dict[str, Any]:
     return out
 
 
-_RE_FAN_INPUT = re.compile(r"^(fan\d+)_input$", re.I)
-
-
 def _fan_sensors() -> dict[str, Any]:
     """Fan speeds from psutil and, if needed, ``/sys/class/hwmon`` ``fan*_input`` (RPM)."""
     ts = time.time()
@@ -1485,12 +1699,15 @@ def _fan_sensors() -> dict[str, Any]:
                     rpm_i = int(round(float(rpm)))
                 except (TypeError, ValueError):
                     continue
-                readings.append(
-                    {
-                        "label": (getattr(e, "label", "") or "").strip(),
-                        "rpm": rpm_i,
-                    }
-                )
+                lbl = (getattr(e, "label", "") or "").strip()
+                row: dict[str, Any] = {
+                    "label": lbl,
+                    "rpm": rpm_i,
+                }
+                dk = _hwmon_fan_detail_key(str(chip), lbl)
+                if dk:
+                    row["detail_key"] = dk
+                readings.append(row)
             if readings:
                 out["chips"][str(chip)] = readings
     if not out["chips"]:
@@ -1525,7 +1742,13 @@ def _fan_sensors() -> dict[str, Any]:
                             ).strip()
                         except OSError:
                             pass
-                    readings.append({"label": label, "rpm": raw})
+                    readings.append(
+                        {
+                            "label": label,
+                            "rpm": raw,
+                            "detail_key": f"hwmon:{hw.name}:{stem}",
+                        }
+                    )
                 if readings:
                     out["chips"][chip_name] = readings
     return out
@@ -1615,6 +1838,7 @@ def collect_snapshot(
         "disk": _disk_mounts(),
         "zfs_pools": _zfs_pool_summaries(),
         "network": net,
+        "listening_ports": _listening_ports(),
         "disk_io": disk_io,
         "thermal": _thermal_sensors(),
         "fans": _fan_sensors(),

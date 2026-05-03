@@ -18,6 +18,7 @@ from mission_control.metrics import (
     collect_interface_detail,
     collect_mount_detail,
     collect_process_detail,
+    collect_fan_detail,
     collect_snapshot,
     collect_thermal_detail,
     collect_zpool_detail,
@@ -100,6 +101,15 @@ def thermal_detail(key: str = Query(..., min_length=4, max_length=260)) -> dict:
     data = collect_thermal_detail(key)
     if data is None:
         raise HTTPException(status_code=404, detail="Sensor not found")
+    return data
+
+
+@app.get("/api/fan/detail")
+def fan_detail(key: str = Query(..., min_length=8, max_length=260)) -> dict:
+    """Sysfs-backed fields for one hwmon fan channel (``hwmon:hwmonN:fanM``)."""
+    data = collect_fan_detail(key)
+    if data is None:
+        raise HTTPException(status_code=404, detail="Fan sensor not found")
     return data
 
 

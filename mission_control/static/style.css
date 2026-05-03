@@ -1018,6 +1018,49 @@ table.mc-table.mc-table-procs {
   line-height: 1.35;
 }
 
+.mc-table-net-ports th.net-ports-sortable {
+  cursor: pointer;
+  user-select: none;
+}
+
+.mc-table-net-ports th.net-ports-sortable:hover {
+  color: var(--text);
+}
+
+.mc-table-net-ports .net-port-th-num,
+.mc-table-net-ports .net-port-td-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.mc-table-net-ports .net-port-th-ip,
+.mc-table-net-ports .net-port-td-ip {
+  text-align: left;
+  max-width: 14rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mc-table-net-ports .net-port-th-proc,
+.mc-table-net-ports .net-port-td-proc {
+  text-align: left;
+  max-width: 14rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mc-table-net-ports .net-port-td-proc {
+  font-size: 0.88em;
+}
+
+.mc-listen-ports-note {
+  margin: 0 0 0.6rem;
+  color: var(--warn);
+}
+
 .mc-table-disk-io th.disk-io-sortable {
   cursor: pointer;
   user-select: none;
@@ -1109,6 +1152,28 @@ table.mc-table.mc-table-procs {
 
 .mc-table-thermal .thermal-th-meta {
   text-align: left;
+}
+
+.mc-table-fans th.fan-sortable {
+  cursor: pointer;
+  user-select: none;
+}
+
+.mc-table-fans th.fan-sortable:hover {
+  color: var(--text);
+}
+
+.mc-table-fans tbody tr.fan-row-detail {
+  cursor: pointer;
+}
+
+.mc-table-fans tbody tr.fan-row-detail:hover {
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+}
+
+.mc-table-fans tbody tr.fan-row-detail:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  outline-offset: -2px;
 }
 
 .mc-table-fans .fan-td-name {
