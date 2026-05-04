@@ -582,8 +582,15 @@ function streamIncludeDockerVolumes() {
   return panelStreamActive("containers") && !loadSubsectionCollapsed(DOCKER_VOL_COLLAPSED_KEY);
 }
 
+/** Trimmed text in the process search box (for display / stream limits). */
+function procSearchQueryTrimmed() {
+  const searchEl = document.getElementById("proc-search");
+  return (searchEl && searchEl.value ? searchEl.value : "").trim();
+}
+
 /** Max processes to pull from the server on each snapshot (0 = full machine scan). */
 function streamProcSampleLimit() {
+  if (procSearchQueryTrimmed().length > 0) return 0;
   const el = document.getElementById("proc-limit");
   if (!el || el.value === "" || el.value == null) return 200;
   const n = parseInt(el.value, 10);
@@ -1046,6 +1053,7 @@ function refreshAllSettingsFromStorage() {
   const netRateSel = document.getElementById("net-rate-unit-select");
   if (netRateSel) netRateSel.value = netRateUnit;
   applyProcPrefsToForm();
+  procStreamSampleExpandForSearch = procSearchQueryTrimmed().length > 0;
 
   aptPackagesExpanded = loadAptPackagesExpanded();
   aptPkgSortDir = loadAptPkgSortDir();
@@ -4778,6 +4786,8 @@ function initProcessTableRowClicks() {
 
 let lastProcesses = [];
 let lastSnapshotLogicalCpus = 1;
+/** Whether the live stream is using expanded process sampling (non-empty process search). */
+let procStreamSampleExpandForSearch = false;
 let lastAptPackages = null;
 const APT_PACKAGES_EXPANDED_KEY = "mc-ops-apt-packages-expanded";
 const APT_PKG_SEARCH_KEY = "mc-apt-pkg-search";
@@ -5159,6 +5169,7 @@ function renderProcsTable() {
   const limitEl = document.getElementById("proc-limit");
 
   const q = (searchEl && searchEl.value ? searchEl.value : "").trim().toLowerCase();
+  const searchActive = q.length > 0;
   let limit = parseInt(limitEl && limitEl.value ? limitEl.value : "12", 10);
   if (!Number.isFinite(limit) || limit < 0) limit = 12;
   const showAllRows = limit === 0;
@@ -5203,7 +5214,9 @@ function renderProcsTable() {
   const meta =
     totalMatching === 0 && q
       ? `<p class="proc-table-meta">No matches for '${escapeHtml(q)}' · ${raw.length} processes in sample</p>`
-      : `<p class="proc-table-meta">Showing ${shown.length} of ${totalMatching}${q ? " matching" : ""} · ${raw.length} in sample · click a row for details</p>`;
+      : `<p class="proc-table-meta">Showing ${shown.length} of ${totalMatching}${q ? " matching" : ""} · ${raw.length} in sample${
+          searchActive ? " (full list while searching)" : ""
+        } · click a row for details</p>`;
 
   if (!shown.length) {
     wrap.innerHTML =
@@ -5284,6 +5297,7 @@ function renderProcsTable() {
 
 function initProcessControls() {
   applyProcPrefsToForm();
+  procStreamSampleExpandForSearch = procSearchQueryTrimmed().length > 0;
   loadProcSortKeyDir();
   initProcSortHeaderClicks();
   const search = document.getElementById("proc-search");
@@ -5304,6 +5318,11 @@ function initProcessControls() {
   search?.addEventListener("input", () => {
     renderProcsTable();
     debouncedSaveSearch();
+    const active = procSearchQueryTrimmed().length > 0;
+    if (active !== procStreamSampleExpandForSearch) {
+      procStreamSampleExpandForSearch = active;
+      connectMetricsStream();
+    }
   });
   limit?.addEventListener("change", () => {
     saveProcPrefs();
