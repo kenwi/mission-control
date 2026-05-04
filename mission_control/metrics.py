@@ -1902,42 +1902,59 @@ def _normalize_docker_volume_rows(raw: list[dict[str, Any]]) -> list[dict[str, A
     return out
 
 
-def collect_docker_snapshot() -> dict[str, Any] | None:
-    """Containers, images, and volumes via ``docker`` CLI (JSON line format)."""
-    if not shutil.which("docker"):
-        return {
-            "ts": time.time(),
-            "containers": [],
-            "images": [],
-            "volumes": [],
-            "note": "Docker CLI not found on PATH.",
-        }
+def collect_docker_snapshot(
+    *,
+    include_containers: bool = True,
+    include_images: bool = True,
+    include_volumes: bool = True,
+) -> dict[str, Any] | None:
+    """Containers, images, and volumes via ``docker`` CLI (JSON line format).
+
+    When every ``include_*`` flag is false, returns ``None``.
+    """
+    if not (include_containers or include_images or include_volumes):
+        return None
+
     notes: list[str] = []
     containers: list[dict[str, Any]] = []
     images: list[dict[str, Any]] = []
     volumes: list[dict[str, Any]] = []
 
-    c_raw, c_err = _docker_ndjson_rows(
-        ["docker", "container", "ls", "-a", "--no-trunc", "--format", "{{json .}}"]
-    )
-    if c_err:
-        notes.append(c_err)
-    else:
-        containers = _normalize_docker_container_rows(c_raw)
+    if not shutil.which("docker"):
+        return {
+            "ts": time.time(),
+            "containers": [] if include_containers else [],
+            "images": [] if include_images else [],
+            "volumes": [] if include_volumes else [],
+            "note": "Docker CLI not found on PATH.",
+        }
 
-    i_raw, i_err = _docker_ndjson_rows(
-        ["docker", "image", "ls", "-a", "--no-trunc", "--format", "{{json .}}"]
-    )
-    if i_err:
-        notes.append(f"images: {i_err}")
-    else:
-        images = _normalize_docker_image_rows(i_raw)
+    if include_containers:
+        c_raw, c_err = _docker_ndjson_rows(
+            ["docker", "container", "ls", "-a", "--no-trunc", "--format", "{{json .}}"]
+        )
+        if c_err:
+            notes.append(c_err)
+        else:
+            containers = _normalize_docker_container_rows(c_raw)
 
-    v_raw, v_err = _docker_ndjson_rows(["docker", "volume", "ls", "--format", "{{json .}}"])
-    if v_err:
-        notes.append(f"volumes: {v_err}")
-    else:
-        volumes = _normalize_docker_volume_rows(v_raw)
+    if include_images:
+        i_raw, i_err = _docker_ndjson_rows(
+            ["docker", "image", "ls", "-a", "--no-trunc", "--format", "{{json .}}"]
+        )
+        if i_err:
+            notes.append(f"images: {i_err}")
+        else:
+            images = _normalize_docker_image_rows(i_raw)
+
+    if include_volumes:
+        v_raw, v_err = _docker_ndjson_rows(
+            ["docker", "volume", "ls", "--format", "{{json .}}"]
+        )
+        if v_err:
+            notes.append(f"volumes: {v_err}")
+        else:
+            volumes = _normalize_docker_volume_rows(v_raw)
 
     note = "; ".join(notes) if notes else None
     return {
@@ -2028,19 +2045,72 @@ def collect_snapshot(
     disk_io_state: DiskIoState,
     *,
     include_slow: bool = False,
+    include_compute: bool = True,
+    include_network: bool = True,
+    include_listening_ports: bool = True,
+    include_thermal: bool = True,
+    include_fans: bool = True,
+    include_operations: bool = True,
+    include_disk_mounts: bool = True,
+    include_zfs: bool = True,
+    include_disk_io: bool = True,
     include_processes: bool = True,
     process_sample_limit: int = 200,
-    include_disk_io: bool = True,
-    include_docker: bool = True,
+    include_docker_containers: bool = True,
+    include_docker_images: bool = True,
+    include_docker_volumes: bool = True,
 ) -> dict[str, Any]:
-    """Build one metrics snapshot. cpu_sample_interval None = non-blocking (may be 0 first call)."""
-    vm = psutil.virtual_memory()
-    swap = psutil.swap_memory()
-    cpu_count = psutil.cpu_count(logical=True) or 1
-    cpu_pct = psutil.cpu_percent(interval=cpu_sample_interval, percpu=False)
+    """Build one metrics snapshot. cpu_sample_interval None = non-blocking (may be 0 first call).
 
-    net_raw = _net_io()
-    net = net_state.with_rates(net_raw)
+    Skip expensive work by setting the matching ``include_*`` flag to ``False``; omitted
+    sections are returned as ``null`` (or ``[]`` for processes). Slow systemd/APT refresh
+    runs only when both ``include_slow`` and ``include_operations`` are true.
+    """
+    data: dict[str, Any] = {
+        "ts": time.time(),
+        "host": os.uname().nodename,
+        "os": _read_os_release(),
+    }
+
+    if include_compute:
+        vm = psutil.virtual_memory()
+        swap = psutil.swap_memory()
+        cpu_count = psutil.cpu_count(logical=True) or 1
+        cpu_pct = psutil.cpu_percent(interval=cpu_sample_interval, percpu=False)
+        data["uptime_sec"] = int(time.time() - psutil.boot_time())
+        data["cpu"] = {
+            "percent": round(cpu_pct, 1),
+            "count_logical": cpu_count,
+            "load_avg": list(os.getloadavg()) if hasattr(os, "getloadavg") else None,
+        }
+        data["memory"] = {
+            "total": vm.total,
+            "available": vm.available,
+            "used": vm.used,
+            "percent": round(vm.percent, 1),
+        }
+        data["swap"] = {
+            "total": swap.total,
+            "used": swap.used,
+            "percent": round(swap.percent, 1) if swap.total else 0.0,
+        }
+    else:
+        data["uptime_sec"] = None
+        data["cpu"] = None
+        data["memory"] = None
+        data["swap"] = None
+
+    if include_network:
+        net_raw = _net_io()
+        net = net_state.with_rates(net_raw)
+    else:
+        net = None
+
+    if include_listening_ports:
+        listening_ports = _listening_ports()
+    else:
+        listening_ports = None
+
     if include_disk_io:
         disk_raw = _read_diskstats()
         disk_io = disk_io_state.with_rates(disk_raw)
@@ -2049,39 +2119,33 @@ def collect_snapshot(
         disk_io_state.last_rates = {}
         disk_io = None
 
-    data: dict[str, Any] = {
-        "ts": time.time(),
-        "host": os.uname().nodename,
-        "os": _read_os_release(),
-        "uptime_sec": int(time.time() - psutil.boot_time()),
-        "cpu": {
-            "percent": round(cpu_pct, 1),
-            "count_logical": cpu_count,
-            "load_avg": list(os.getloadavg()) if hasattr(os, "getloadavg") else None,
-        },
-        "memory": {
-            "total": vm.total,
-            "available": vm.available,
-            "used": vm.used,
-            "percent": round(vm.percent, 1),
-        },
-        "swap": {
-            "total": swap.total,
-            "used": swap.used,
-            "percent": round(swap.percent, 1) if swap.total else 0.0,
-        },
-        "disk": _disk_mounts(),
-        "zfs_pools": _zfs_pool_summaries(),
-        "network": net,
-        "listening_ports": _listening_ports(),
-        "disk_io": disk_io,
-        "thermal": _thermal_sensors(),
-        "fans": _fan_sensors(),
-        "processes": _top_processes(process_sample_limit) if include_processes else [],
-        "docker": collect_docker_snapshot() if include_docker else None,
-    }
+    data["disk"] = _disk_mounts() if include_disk_mounts else None
+    data["zfs_pools"] = _zfs_pool_summaries() if include_zfs else None
+    data["network"] = net
+    data["listening_ports"] = listening_ports
+    data["disk_io"] = disk_io
+    data["thermal"] = _thermal_sensors() if include_thermal else None
+    data["fans"] = _fan_sensors() if include_fans else None
+    data["processes"] = (
+        _top_processes(process_sample_limit) if include_processes else []
+    )
 
-    if include_slow:
+    want_docker = (
+        include_docker_containers
+        or include_docker_images
+        or include_docker_volumes
+    )
+    data["docker"] = (
+        collect_docker_snapshot(
+            include_containers=include_docker_containers,
+            include_images=include_docker_images,
+            include_volumes=include_docker_volumes,
+        )
+        if want_docker
+        else None
+    )
+
+    if include_slow and include_operations:
         _slow_metrics_cache["systemd_failed"] = _systemctl_failed()
         apt_list = _apt_upgradable_list()
         _slow_metrics_cache["apt_upgradable"] = (
@@ -2089,8 +2153,15 @@ def collect_snapshot(
         )
         _slow_metrics_cache["apt_upgradable_packages"] = apt_list
 
-    data["systemd_failed"] = _slow_metrics_cache["systemd_failed"]
-    data["apt_upgradable"] = _slow_metrics_cache["apt_upgradable"]
-    data["apt_upgradable_packages"] = _slow_metrics_cache["apt_upgradable_packages"]
+    if include_operations:
+        data["systemd_failed"] = _slow_metrics_cache["systemd_failed"]
+        data["apt_upgradable"] = _slow_metrics_cache["apt_upgradable"]
+        data["apt_upgradable_packages"] = _slow_metrics_cache[
+            "apt_upgradable_packages"
+        ]
+    else:
+        data["systemd_failed"] = None
+        data["apt_upgradable"] = None
+        data["apt_upgradable_packages"] = None
 
     return data

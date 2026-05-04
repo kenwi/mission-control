@@ -44,14 +44,24 @@ async def index() -> FileResponse:
 @app.get("/api/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
-
+ 
 
 @app.get("/api/metrics")
 def metrics(
     processes: bool = Query(True),
     proc_limit: int = Query(200, ge=0, le=100_000),
     disk_io: bool = Query(True),
-    docker: bool = Query(True),
+    docker_containers: bool = Query(True),
+    docker_images: bool = Query(True),
+    docker_volumes: bool = Query(True),
+    compute: bool = Query(True),
+    network: bool = Query(True),
+    listening_ports: bool = Query(True),
+    thermal: bool = Query(True),
+    fans: bool = Query(True),
+    operations: bool = Query(True),
+    mounts: bool = Query(True),
+    zfs: bool = Query(True),
 ) -> dict:
     global _slow_last
     now = time.time()
@@ -63,10 +73,20 @@ def metrics(
         net_state=_net_state,
         disk_io_state=_disk_io_state,
         include_slow=include_slow,
+        include_compute=compute,
+        include_network=network,
+        include_listening_ports=listening_ports,
+        include_thermal=thermal,
+        include_fans=fans,
+        include_operations=operations,
+        include_disk_mounts=mounts,
+        include_zfs=zfs,
+        include_disk_io=disk_io,
         include_processes=processes,
         process_sample_limit=proc_limit,
-        include_disk_io=disk_io,
-        include_docker=docker,
+        include_docker_containers=docker_containers,
+        include_docker_images=docker_images,
+        include_docker_volumes=docker_volumes,
     )
     return sample
 
@@ -182,7 +202,17 @@ async def stream(
     interval: float = Query(1.0, ge=0.25, le=30.0),
     processes: bool = Query(True),
     disk_io: bool = Query(True),
-    docker: bool = Query(True),
+    docker_containers: bool = Query(True),
+    docker_images: bool = Query(True),
+    docker_volumes: bool = Query(True),
+    compute: bool = Query(True),
+    network: bool = Query(True),
+    listening_ports: bool = Query(True),
+    thermal: bool = Query(True),
+    fans: bool = Query(True),
+    operations: bool = Query(True),
+    mounts: bool = Query(True),
+    zfs: bool = Query(True),
     proc_limit: int = Query(
         200,
         ge=0,
@@ -192,10 +222,9 @@ async def stream(
 ):
     """SSE: live metrics; `interval` is seconds between snapshots (0.25–30).
 
-    Set ``processes=false`` to omit top-process collection (empty ``processes`` list).
-    Set ``disk_io=false`` to skip ``/proc/diskstats`` and omit ``disk_io`` in payloads.
-    Set ``docker=false`` to skip Docker CLI calls and omit ``docker`` in payloads.
-    Use ``proc_limit=0`` to include every process in the sample (heavier).
+    Set query flags to ``false`` to skip collecting expensive sections (see
+    ``collect_snapshot``). Docker lists are controlled independently via
+    ``docker_containers``, ``docker_images``, and ``docker_volumes``.
     """
 
     async def gen():
@@ -205,10 +234,20 @@ async def stream(
             net_state=_net_state,
             disk_io_state=_disk_io_state,
             include_slow=False,
+            include_compute=compute,
+            include_network=network,
+            include_listening_ports=listening_ports,
+            include_thermal=thermal,
+            include_fans=fans,
+            include_operations=operations,
+            include_disk_mounts=mounts,
+            include_zfs=zfs,
+            include_disk_io=disk_io,
             include_processes=processes,
             process_sample_limit=proc_limit,
-            include_disk_io=disk_io,
-            include_docker=docker,
+            include_docker_containers=docker_containers,
+            include_docker_images=docker_images,
+            include_docker_volumes=docker_volumes,
         )
         while True:
             now = time.time()
@@ -220,10 +259,20 @@ async def stream(
                 net_state=_net_state,
                 disk_io_state=_disk_io_state,
                 include_slow=include_slow,
+                include_compute=compute,
+                include_network=network,
+                include_listening_ports=listening_ports,
+                include_thermal=thermal,
+                include_fans=fans,
+                include_operations=operations,
+                include_disk_mounts=mounts,
+                include_zfs=zfs,
+                include_disk_io=disk_io,
                 include_processes=processes,
                 process_sample_limit=proc_limit,
-                include_disk_io=disk_io,
-                include_docker=docker,
+                include_docker_containers=docker_containers,
+                include_docker_images=docker_images,
+                include_docker_volumes=docker_volumes,
             )
             line = "data: " + json.dumps(snap) + "\n\n"
             yield line.encode("utf-8")

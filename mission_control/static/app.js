@@ -315,6 +315,7 @@ const PANEL_VISIBILITY_KEY = "mc-panel-visibility";
 const PANEL_ORDER_KEY = "mc-panel-order";
 const PANEL_COLLAPSED_KEY = "mc-panel-collapsed";
 const STORAGE_DISK_IO_COLLAPSED_KEY = "mc-storage-disk-io-collapsed";
+const THERMAL_SENSORS_COLLAPSED_KEY = "mc-thermal-sensors-collapsed";
 const THERMAL_FANS_COLLAPSED_KEY = "mc-thermal-fans-collapsed";
 const NETWORK_INTERFACES_COLLAPSED_KEY = "mc-network-interfaces-collapsed";
 const NETWORK_LISTEN_PORTS_COLLAPSED_KEY = "mc-network-listen-ports-collapsed";
@@ -385,7 +386,7 @@ function initPanelVisibilityControls() {
       next[id] = input.checked;
       savePanelVisibility(next);
       applyPanelVisibility();
-      if (id === "processes" || id === "storage" || id === "containers") connectMetricsStream();
+      connectMetricsStream();
     });
   }
   applyPanelVisibility();
@@ -514,31 +515,69 @@ function loadUpdateInterval() {
 
 let metricsEventSource = null;
 
-/** Whether the live stream should collect top processes (server skips work when false). */
-function streamIncludeProcesses() {
-  const section = document.querySelector('section.panel[data-panel-id="processes"]');
+/** Section is shown in the layout (visible checkbox) and panel title is expanded. */
+function panelStreamActive(panelId) {
+  const section = document.querySelector(`section.panel[data-panel-id="${panelId}"]`);
   if (!section) return true;
   if (section.hidden) return false;
   if (section.classList.contains("is-collapsed")) return false;
   return true;
+}
+
+function streamIncludeCompute() {
+  return panelStreamActive("compute");
+}
+
+function streamIncludeThermalSensors() {
+  return panelStreamActive("thermal") && !loadSubsectionCollapsed(THERMAL_SENSORS_COLLAPSED_KEY);
+}
+
+function streamIncludeThermalFans() {
+  return panelStreamActive("thermal") && !loadSubsectionCollapsed(THERMAL_FANS_COLLAPSED_KEY);
+}
+
+function streamIncludeOperations() {
+  return panelStreamActive("operations");
+}
+
+function streamIncludeDiskMounts() {
+  return panelStreamActive("storage") && !loadSubsectionCollapsed(STORAGE_MOUNTS_COLLAPSED_KEY);
+}
+
+function streamIncludeZfsPools() {
+  return panelStreamActive("storage") && !loadSubsectionCollapsed(STORAGE_ZFS_COLLAPSED_KEY);
+}
+
+function streamIncludeNetworkIfaces() {
+  return panelStreamActive("network") && !loadSubsectionCollapsed(NETWORK_INTERFACES_COLLAPSED_KEY);
+}
+
+function streamIncludeListeningPorts() {
+  return panelStreamActive("network") && !loadSubsectionCollapsed(NETWORK_LISTEN_PORTS_COLLAPSED_KEY);
+}
+
+/** Whether the live stream should collect top processes (server skips work when false). */
+function streamIncludeProcesses() {
+  return panelStreamActive("processes");
 }
 
 /** Whether the server should read diskstats and fill ``disk_io`` (false when Storage / Disk I/O not shown). */
 function streamIncludeDiskIo() {
-  const section = document.querySelector('section.panel[data-panel-id="storage"]');
-  if (!section) return true;
-  if (section.hidden) return false;
-  if (section.classList.contains("is-collapsed")) return false;
+  if (!panelStreamActive("storage")) return false;
   if (loadStorageDiskIoCollapsed()) return false;
   return true;
 }
 
-function streamIncludeDocker() {
-  const section = document.querySelector('section.panel[data-panel-id="containers"]');
-  if (!section) return true;
-  if (section.hidden) return false;
-  if (section.classList.contains("is-collapsed")) return false;
-  return true;
+function streamIncludeDockerContainers() {
+  return panelStreamActive("containers") && !loadSubsectionCollapsed(DOCKER_CONT_COLLAPSED_KEY);
+}
+
+function streamIncludeDockerImages() {
+  return panelStreamActive("containers") && !loadSubsectionCollapsed(DOCKER_IMG_COLLAPSED_KEY);
+}
+
+function streamIncludeDockerVolumes() {
+  return panelStreamActive("containers") && !loadSubsectionCollapsed(DOCKER_VOL_COLLAPSED_KEY);
 }
 
 /** Max processes to pull from the server on each snapshot (0 = full machine scan). */
@@ -550,11 +589,39 @@ function streamProcSampleLimit() {
   return n;
 }
 
-function connectMetricsStream() {
+function disconnectMetricsStream() {
   if (metricsEventSource) {
     metricsEventSource.close();
     metricsEventSource = null;
   }
+}
+
+function metricsStreamQuerySuffix() {
+  const sec = loadUpdateInterval();
+  const procs = streamIncludeProcesses();
+  const diskIo = streamIncludeDiskIo();
+  const procLimit = streamProcSampleLimit();
+  const q = new URLSearchParams();
+  q.set("interval", String(sec));
+  q.set("processes", String(procs));
+  q.set("disk_io", String(diskIo));
+  q.set("proc_limit", String(procLimit));
+  q.set("compute", String(streamIncludeCompute()));
+  q.set("network", String(streamIncludeNetworkIfaces()));
+  q.set("listening_ports", String(streamIncludeListeningPorts()));
+  q.set("thermal", String(streamIncludeThermalSensors()));
+  q.set("fans", String(streamIncludeThermalFans()));
+  q.set("operations", String(streamIncludeOperations()));
+  q.set("mounts", String(streamIncludeDiskMounts()));
+  q.set("zfs", String(streamIncludeZfsPools()));
+  q.set("docker_containers", String(streamIncludeDockerContainers()));
+  q.set("docker_images", String(streamIncludeDockerImages()));
+  q.set("docker_volumes", String(streamIncludeDockerVolumes()));
+  return q.toString();
+}
+
+function connectMetricsStream() {
+  disconnectMetricsStream();
   if (loadStreamPaused()) {
     const pill = document.getElementById("conn-pill");
     if (pill) {
@@ -563,12 +630,7 @@ function connectMetricsStream() {
     }
     return;
   }
-  const sec = loadUpdateInterval();
-  const procs = streamIncludeProcesses();
-  const diskIo = streamIncludeDiskIo();
-  const dock = streamIncludeDocker();
-  const procLimit = streamProcSampleLimit();
-  const u = `/api/stream?interval=${encodeURIComponent(String(sec))}&processes=${procs}&disk_io=${diskIo}&docker=${dock}&proc_limit=${encodeURIComponent(String(procLimit))}`;
+  const u = `/api/stream?${metricsStreamQuerySuffix()}`;
   metricsEventSource = new EventSource(u);
   metricsEventSource.onmessage = (ev) => {
     try {
@@ -585,6 +647,17 @@ function connectMetricsStream() {
     }
   };
 }
+
+window.addEventListener("pagehide", () => disconnectMetricsStream());
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "hidden") {
+    disconnectMetricsStream();
+    return;
+  }
+  if (!loadStreamPaused()) {
+    connectMetricsStream();
+  }
+});
 
 function initUpdateIntervalControl() {
   const pauseChk = document.getElementById("stream-pause");
@@ -1011,7 +1084,7 @@ function togglePanelCollapse(section) {
     /* ignore */
   }
   syncPanelCollapsedUi(section);
-  if (id === "processes" || id === "storage" || id === "containers") connectMetricsStream();
+  connectMetricsStream();
 }
 
 function initPanelLayout() {
@@ -1438,7 +1511,7 @@ function initStoragePanel() {
     "Expand Mounts",
     "Collapse Mounts",
     "mountsSubCollapseBound",
-    undefined
+    connectMetricsStream
   );
   initSubsectionCollapse(
     STORAGE_ZFS_COLLAPSED_KEY,
@@ -1447,7 +1520,7 @@ function initStoragePanel() {
     "Expand ZFS pools",
     "Collapse ZFS pools",
     "zfsSubCollapseBound",
-    undefined
+    connectMetricsStream
   );
   initSubsectionCollapse(
     STORAGE_DISK_IO_COLLAPSED_KEY,
@@ -2675,7 +2748,7 @@ function initNetworkPanel() {
     "Expand Interfaces",
     "Collapse Interfaces",
     "netIfSubCollapseBound",
-    undefined
+    connectMetricsStream
   );
   applySubsectionCollapsed(
     NETWORK_LISTEN_PORTS_COLLAPSED_KEY,
@@ -2691,7 +2764,7 @@ function initNetworkPanel() {
     "Expand Listening ports",
     "Collapse Listening ports",
     "netListenPortsSubBound",
-    undefined
+    connectMetricsStream
   );
   initListenPortsToolbar();
 }
@@ -3323,7 +3396,7 @@ function renderDockerAll() {
       noteEl.hidden = false;
     } else if (lastDocker === null) {
       noteEl.textContent =
-        "Docker snapshot omitted while the Containers panel is hidden or collapsed.";
+        "Docker metrics omitted: hide the Containers panel, collapse it, or collapse all Docker subsections.";
       noteEl.hidden = false;
     } else {
       noteEl.textContent = "";
@@ -3579,7 +3652,7 @@ function initContainersPanel() {
     "Expand Docker containers",
     "Collapse Docker containers",
     "dockerContSubBound",
-    undefined
+    connectMetricsStream
   );
   applySubsectionCollapsed(
     DOCKER_IMG_COLLAPSED_KEY,
@@ -3595,7 +3668,7 @@ function initContainersPanel() {
     "Expand Docker images",
     "Collapse Docker images",
     "dockerImgSubBound",
-    undefined
+    connectMetricsStream
   );
   applySubsectionCollapsed(
     DOCKER_VOL_COLLAPSED_KEY,
@@ -3611,7 +3684,7 @@ function initContainersPanel() {
     "Expand Docker volumes",
     "Collapse Docker volumes",
     "dockerVolSubBound",
-    undefined
+    connectMetricsStream
   );
 }
 
@@ -3810,7 +3883,6 @@ function renderDiskIo(dio) {
 
 const THERMAL_SORT_KEYDIR_KEY = "mc-thermal-sort-keydir";
 const FAN_SORT_KEYDIR_KEY = "mc-fan-sort-keydir";
-const THERMAL_SENSORS_COLLAPSED_KEY = "mc-thermal-sensors-collapsed";
 
 /** @type {"name"|"temp"} */
 let thermalSortColumn = "name";
@@ -4209,7 +4281,7 @@ function initThermalPanel() {
     "Expand Sensors",
     "Collapse Sensors",
     "thermalSensorsSubBound",
-    undefined
+    connectMetricsStream
   );
   applySubsectionCollapsed(
     THERMAL_FANS_COLLAPSED_KEY,
@@ -4225,7 +4297,7 @@ function initThermalPanel() {
     "Expand Fans",
     "Collapse Fans",
     "thermalFansSubCollapseBound",
-    undefined
+    connectMetricsStream
   );
 }
 
