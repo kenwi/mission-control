@@ -330,6 +330,8 @@ const DOCKER_VOL_COLLAPSED_KEY = "mc-docker-volumes-collapsed";
 const DOCKER_CONT_SORT_KEYDIR_KEY = "mc-docker-cont-sort-keydir";
 const DOCKER_IMG_SORT_KEYDIR_KEY = "mc-docker-img-sort-keydir";
 const DOCKER_VOL_SORT_KEYDIR_KEY = "mc-docker-vol-sort-keydir";
+const CPU_LAYOUT_KEY = "mc-cpu-layout";
+const CPU_TOPOLOGY_SELECT_CAP = 128;
 
 function loadPanelVisibility() {
   const d = {};
@@ -596,6 +598,146 @@ function disconnectMetricsStream() {
   }
 }
 
+function loadCpuLayout() {
+  try {
+    const raw = localStorage.getItem(CPU_LAYOUT_KEY);
+    if (!raw) return null;
+    const o = JSON.parse(raw);
+    if (!o || typeof o !== "object") return null;
+    const sockets = parseInt(o.sockets, 10);
+    const coresPerSocket = parseInt(o.coresPerSocket, 10);
+    const threadsPerCore = parseInt(o.threadsPerCore, 10);
+    if (!Number.isFinite(sockets) || sockets < 1) return null;
+    if (!Number.isFinite(coresPerSocket) || coresPerSocket < 1) return null;
+    if (!Number.isFinite(threadsPerCore) || threadsPerCore < 1) return null;
+    return { sockets, coresPerSocket, threadsPerCore };
+  } catch (_) {
+    return null;
+  }
+}
+
+function saveCpuLayout(layout) {
+  try {
+    localStorage.setItem(CPU_LAYOUT_KEY, JSON.stringify(layout));
+  } catch (_) {
+    /* ignore */
+  }
+}
+
+function effectiveProcCpuDivisor() {
+  const L = loadCpuLayout();
+  if (!L) return Math.max(1, lastSnapshotLogicalCpus || 1);
+  const n = L.sockets * L.coresPerSocket * L.threadsPerCore;
+  return Math.max(1, n || 1);
+}
+
+function fillCpuTopologySelect(sel, current) {
+  if (!sel) return;
+  const cur = Math.max(1, Math.min(Number(current) || 1, 4096));
+  let hi = Math.max(CPU_TOPOLOGY_SELECT_CAP, cur);
+  hi = Math.min(hi, 4096);
+  sel.innerHTML = "";
+  for (let i = 1; i <= hi; i += 1) {
+    const o = document.createElement("option");
+    o.value = String(i);
+    o.textContent = String(i);
+    sel.appendChild(o);
+  }
+  sel.value = String(cur);
+}
+
+function syncCpuTopologyHint(det) {
+  const el = document.getElementById("cpu-topology-detected-line");
+  if (!el) return;
+  if (!det) {
+    el.textContent = "";
+    return;
+  }
+  const extra = det.product_matches_logical
+    ? ""
+    : " Raw layout may not multiply to the OS logical CPU count; adjust if needed.";
+  el.textContent = `Detected (${det.source}): ${det.sockets} socket(s), ${det.cores_per_socket} core(s)/socket, ${det.threads_per_core} thread(s)/core → ${det.logical} logical from OS.${extra}`;
+}
+
+function refreshCpuTopologyForm(det) {
+  const layout = loadCpuLayout();
+  if (!layout) return;
+  if (det) syncCpuTopologyHint(det);
+  fillCpuTopologySelect(document.getElementById("cpu-topology-sockets-select"), layout.sockets);
+  fillCpuTopologySelect(document.getElementById("cpu-topology-cores-select"), layout.coresPerSocket);
+  fillCpuTopologySelect(document.getElementById("cpu-topology-threads-select"), layout.threadsPerCore);
+}
+
+function readCpuLayoutFromForm() {
+  const ss = document.getElementById("cpu-topology-sockets-select");
+  const cs = document.getElementById("cpu-topology-cores-select");
+  const ts = document.getElementById("cpu-topology-threads-select");
+  const sockets = Math.max(1, parseInt(ss && ss.value, 10) || 1);
+  const coresPerSocket = Math.max(1, parseInt(cs && cs.value, 10) || 1);
+  const threadsPerCore = Math.max(1, parseInt(ts && ts.value, 10) || 1);
+  return { sockets, coresPerSocket, threadsPerCore };
+}
+
+function initCpuTopologyControls(done) {
+  const s = document.getElementById("cpu-topology-sockets-select");
+  const c = document.getElementById("cpu-topology-cores-select");
+  const t = document.getElementById("cpu-topology-threads-select");
+  const resetBtn = document.getElementById("cpu-topology-reset-btn");
+  const onChange = () => {
+    saveCpuLayout(readCpuLayoutFromForm());
+    connectMetricsStream();
+  };
+  s?.addEventListener("change", onChange);
+  c?.addEventListener("change", onChange);
+  t?.addEventListener("change", onChange);
+  resetBtn?.addEventListener("click", () => {
+    fetch("/api/cpu-topology")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((det) => {
+        if (!det) return;
+        window.__mcCpuTopologyDetected = det;
+        const layout = {
+          sockets: det.sockets,
+          coresPerSocket: det.cores_per_socket,
+          threadsPerCore: det.threads_per_core,
+        };
+        saveCpuLayout(layout);
+        syncCpuTopologyHint(det);
+        fillCpuTopologySelect(s, layout.sockets);
+        fillCpuTopologySelect(c, layout.coresPerSocket);
+        fillCpuTopologySelect(t, layout.threadsPerCore);
+        connectMetricsStream();
+      });
+  });
+
+  const finish = typeof done === "function" ? done : () => {};
+
+  fetch("/api/cpu-topology")
+    .then((r) => (r.ok ? r.json() : null))
+    .then((det) => {
+      if (det) window.__mcCpuTopologyDetected = det;
+      let layout = loadCpuLayout();
+      if (!layout && det) {
+        layout = {
+          sockets: det.sockets,
+          coresPerSocket: det.cores_per_socket,
+          threadsPerCore: det.threads_per_core,
+        };
+        saveCpuLayout(layout);
+      }
+      if (det && layout) {
+        syncCpuTopologyHint(det);
+        fillCpuTopologySelect(s, layout.sockets);
+        fillCpuTopologySelect(c, layout.coresPerSocket);
+        fillCpuTopologySelect(t, layout.threadsPerCore);
+      }
+      finish();
+    })
+    .catch(() => {
+      finish();
+    });
+}
+
 function metricsStreamQuerySuffix() {
   const sec = loadUpdateInterval();
   const procs = streamIncludeProcesses();
@@ -617,6 +759,14 @@ function metricsStreamQuerySuffix() {
   q.set("docker_containers", String(streamIncludeDockerContainers()));
   q.set("docker_images", String(streamIncludeDockerImages()));
   q.set("docker_volumes", String(streamIncludeDockerVolumes()));
+  if (procs) {
+    const L = loadCpuLayout();
+    if (L) {
+      q.set("proc_cpu_divisor", String(effectiveProcCpuDivisor()));
+    } else if (lastSnapshotLogicalCpus > 1) {
+      q.set("proc_cpu_divisor", String(lastSnapshotLogicalCpus));
+    }
+  }
   return q.toString();
 }
 
@@ -683,7 +833,6 @@ function initUpdateIntervalControl() {
       connectMetricsStream();
     });
   }
-  connectMetricsStream();
 }
 
 function exportMissionControlSettings() {
@@ -804,6 +953,7 @@ function refreshAllSettingsFromStorage() {
   procCpuScale = loadProcCpuScale();
   const cpuScaleSel = document.getElementById("proc-cpu-scale-select");
   if (cpuScaleSel) cpuScaleSel.value = procCpuScale;
+  refreshCpuTopologyForm(window.__mcCpuTopologyDetected);
 
   const procFooter = document.getElementById("proc-footer-rss-total");
   if (procFooter) procFooter.checked = loadProcFooterRssTotalVisible();
@@ -4574,7 +4724,14 @@ function openProcessDetailModal(pid) {
   const closeBtn = document.getElementById("proc-detail-close");
   closeBtn?.focus();
 
-  fetch(`/api/process/${pid}`)
+  const L = loadCpuLayout();
+  let procQ = "";
+  if (L) {
+    procQ = `?proc_cpu_divisor=${encodeURIComponent(String(effectiveProcCpuDivisor()))}`;
+  } else if (lastSnapshotLogicalCpus > 1) {
+    procQ = `?proc_cpu_divisor=${encodeURIComponent(String(lastSnapshotLogicalCpus))}`;
+  }
+  fetch(`/api/process/${pid}${procQ}`)
     .then((res) => {
       if (res.status === 404) throw new Error("Process not found (it may have exited).");
       if (!res.ok) throw new Error(`Request failed (${res.status}).`);
@@ -4691,12 +4848,18 @@ const PROC_CPU_SCALE_KEY = "mc-proc-cpu-scale";
 let procMemUnit = "mb";
 /** @type {"percent"|"bytes"|"both"} */
 let procMemDisplay = "both";
-/** @type {"machine"|"per_core"} */
+
+function normalizeProcCpuScale(v) {
+  if (v === "per_core" || v === "system_monitor") return v;
+  return "machine";
+}
+
+/** @type {"machine"|"per_core"|"system_monitor"} */
 let procCpuScale = "machine";
 
 function loadProcCpuScale() {
   try {
-    return localStorage.getItem(PROC_CPU_SCALE_KEY) === "per_core" ? "per_core" : "machine";
+    return normalizeProcCpuScale(localStorage.getItem(PROC_CPU_SCALE_KEY));
   } catch (_) {
     return "machine";
   }
@@ -4735,7 +4898,7 @@ function initProcMemUnitControl() {
   if (cpuScaleSel) {
     cpuScaleSel.value = procCpuScale;
     cpuScaleSel.addEventListener("change", () => {
-      procCpuScale = cpuScaleSel.value === "per_core" ? "per_core" : "machine";
+      procCpuScale = normalizeProcCpuScale(cpuScaleSel.value);
       try {
         localStorage.setItem(PROC_CPU_SCALE_KEY, procCpuScale);
       } catch (_) {
@@ -4828,6 +4991,7 @@ const MC_SETTINGS_KEYS = [
   PROC_MEM_UNIT_KEY,
   PROC_MEM_DISPLAY_KEY,
   PROC_CPU_SCALE_KEY,
+  CPU_LAYOUT_KEY,
   PROC_SORT_KEYDIR_KEY,
   DISK_SORT_KEYDIR_KEY,
   DISK_IO_SORT_KEYDIR_KEY,
@@ -4936,6 +5100,10 @@ function cmpProcRows(a, b) {
     case "cpu":
       if (procCpuScale === "per_core") {
         cmp = (a.cpu_percent || 0) - (b.cpu_percent || 0);
+      } else if (procCpuScale === "system_monitor") {
+        cmp =
+          (Number(a.cpu_percent_system_monitor) || a.cpu_percent_machine || 0) -
+          (Number(b.cpu_percent_system_monitor) || b.cpu_percent_machine || 0);
       } else {
         cmp = (a.cpu_percent_machine || 0) - (b.cpu_percent_machine || 0);
       }
@@ -5006,13 +5174,18 @@ function renderProcsTable() {
     const cpuRaw = Number(p.cpu_percent) || 0;
     let cpuM = Number(p.cpu_percent_machine);
     if (!Number.isFinite(cpuM)) {
-      cpuM = cpuRaw / Math.max(1, lastSnapshotLogicalCpus || 1);
+      cpuM = cpuRaw / Math.max(1, effectiveProcCpuDivisor());
+    }
+    let cpuSysMon = Number(p.cpu_percent_system_monitor);
+    if (!Number.isFinite(cpuSysMon)) {
+      cpuSysMon = cpuM;
     }
     return {
       pid: p.pid,
       name: p.name,
       cpu_percent: cpuRaw,
       cpu_percent_machine: cpuM,
+      cpu_percent_system_monitor: cpuSysMon,
       memory_percent: Number(p.memory_percent) || 0,
       memory_rss: Number(p.memory_rss) || 0,
     };
@@ -5046,15 +5219,29 @@ function renderProcsTable() {
   const cpuThTitle =
     procCpuScale === "per_core"
       ? "Per logical CPU (100% = one core; can exceed 100%). Hover a row for share of all CPUs."
-      : "Share of all logical CPUs (matches Compute). Hover a row for per-core %.";
+      : procCpuScale === "system_monitor"
+        ? "GNOME System Monitor-style: share of all CPUs with smoothing (~3s). Hover for instant values."
+        : "Share of all logical CPUs (matches Compute). Hover a row for per-core %.";
 
   const rows = shown
     .map((p) => {
-      const cpuMain = procCpuScale === "per_core" ? p.cpu_percent : p.cpu_percent_machine;
-      const cpuTip =
+      let cpuMain =
         procCpuScale === "per_core"
-          ? `All CPUs: ${fmtProcPct(p.cpu_percent_machine).trim()}`
-          : `Per logical CPU: ${fmtProcPct(p.cpu_percent).trim()}`;
+          ? p.cpu_percent
+          : procCpuScale === "system_monitor"
+            ? p.cpu_percent_system_monitor
+            : p.cpu_percent_machine;
+      if (procCpuScale === "system_monitor" && !Number.isFinite(Number(cpuMain))) {
+        cpuMain = p.cpu_percent_machine;
+      }
+      let cpuTip;
+      if (procCpuScale === "per_core") {
+        cpuTip = `All CPUs: ${fmtProcPct(p.cpu_percent_machine).trim()}`;
+      } else if (procCpuScale === "system_monitor") {
+        cpuTip = `Instant (all CPUs): ${fmtProcPct(p.cpu_percent_machine).trim()} · Per logical CPU: ${fmtProcPct(p.cpu_percent).trim()}`;
+      } else {
+        cpuTip = `Per logical CPU: ${fmtProcPct(p.cpu_percent).trim()}`;
+      }
       return `<tr class="proc-row-detail" role="button" tabindex="0" data-pid="${
         p.pid
       }" title="Process details" aria-label="Open details for process ${p.pid}"><td class="proc-td-pid">${fmtProcPid(
@@ -5470,7 +5657,9 @@ initAptPackagesToggle();
 initStoragePanel();
 initContainersPanel();
 initProcessControls();
-initUpdateIntervalControl();
-
-tickClock();
-setInterval(tickClock, 1000);
+initCpuTopologyControls(() => {
+  initUpdateIntervalControl();
+  tickClock();
+  setInterval(tickClock, 1000);
+  connectMetricsStream();
+});

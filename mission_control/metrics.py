@@ -717,8 +717,93 @@ def collect_interface_detail(ifname: str) -> dict[str, Any] | None:
     return out
 
 
-def _top_processes(limit: int = 12) -> list[dict[str, Any]]:
-    n_cpu = psutil.cpu_count(logical=True) or 1
+_PROC_CPU_EWMA: dict[int, float] = {}
+# Mixing factor per snapshot (~3s time constant at ~1 Hz when α≈0.22).
+_PROC_CPU_EWMA_ALPHA = 0.22
+
+
+def detect_cpu_topology() -> dict[str, Any]:
+    """Return socket count, cores per socket, threads per core, and logical CPU count.
+
+    Uses Linux ``sysfs`` topology when available, otherwise ``psutil`` counts.
+    """
+    logical = int(psutil.cpu_count(logical=True) or 1)
+    sysfs = _linux_cpu_topology_from_sysfs()
+    if sysfs is not None:
+        sockets, cores_per_socket, physical_total = sysfs
+        if physical_total > 0:
+            if logical % physical_total == 0:
+                thr = logical // physical_total
+            else:
+                thr = max(1, int(round(float(logical) / float(physical_total))))
+        else:
+            thr = 1
+        thr = max(1, thr)
+        return {
+            "sockets": sockets,
+            "cores_per_socket": cores_per_socket,
+            "threads_per_core": thr,
+            "logical": logical,
+            "physical_total": physical_total,
+            "source": "sysfs",
+            "product_matches_logical": physical_total * thr == logical,
+        }
+    phys = psutil.cpu_count(logical=False)
+    physical = int(phys) if phys and phys > 0 else logical
+    sockets = 1
+    cores_per_socket = max(1, physical)
+    thr = max(1, logical // physical) if physical > 0 else 1
+    if cores_per_socket * thr != logical and cores_per_socket > 0:
+        thr = max(1, logical // cores_per_socket)
+    return {
+        "sockets": sockets,
+        "cores_per_socket": cores_per_socket,
+        "threads_per_core": thr,
+        "logical": logical,
+        "physical_total": physical,
+        "source": "psutil",
+        "product_matches_logical": cores_per_socket * thr == logical,
+    }
+
+
+def _linux_cpu_topology_from_sysfs() -> tuple[int, int, int] | None:
+    base = Path("/sys/devices/system/cpu")
+    if not base.is_dir():
+        return None
+    by_pkg: dict[int, set[int]] = {}
+    for cpu_dir in sorted(base.glob("cpu[0-9]*")):
+        if not cpu_dir.is_dir():
+            continue
+        pkg_f = cpu_dir / "topology/physical_package_id"
+        core_f = cpu_dir / "topology/core_id"
+        try:
+            pkg = int(pkg_f.read_text(encoding="utf-8", errors="replace").strip())
+            core = int(core_f.read_text(encoding="utf-8", errors="replace").strip())
+        except (ValueError, OSError):
+            continue
+        by_pkg.setdefault(pkg, set()).add(core)
+    if not by_pkg:
+        return None
+    sockets = len(by_pkg)
+    core_counts = [len(cset) for cset in by_pkg.values()]
+    physical_total = sum(core_counts)
+    if physical_total < 1 or sockets < 1:
+        return None
+    cores_per_socket = max(1, physical_total // sockets)
+    return (sockets, cores_per_socket, physical_total)
+
+
+def _n_cpu_for_process_percent(process_cpu_divisor: int | None) -> int:
+    if process_cpu_divisor is not None and process_cpu_divisor >= 1:
+        return min(int(process_cpu_divisor), 4096)
+    return psutil.cpu_count(logical=True) or 1
+
+
+def _top_processes(
+    limit: int = 12,
+    process_cpu_divisor: int | None = None,
+) -> list[dict[str, Any]]:
+    n_cpu = _n_cpu_for_process_percent(process_cpu_divisor)
     candidates: list[psutil.Process] = []
     for p in psutil.process_iter(["pid", "name"]):
         try:
@@ -738,24 +823,40 @@ def _top_processes(limit: int = 12) -> list[dict[str, Any]]:
     scored.sort(key=lambda t: (t[0] + t[1] * 2), reverse=True)
     take = scored if limit <= 0 else scored[:limit]
     out: list[dict[str, Any]] = []
+    out_pids: set[int] = set()
     for cpu, mem, p in take:
         try:
             with p.oneshot():
                 name = p.name()
                 rss = int(p.memory_info().rss or 0)
-            cpu_machine = round(cpu / n_cpu, 1)
+            cpu_machine_f = float(cpu) / float(n_cpu)
+            cpu_machine = round(cpu_machine_f, 1)
+            old_sm = _PROC_CPU_EWMA.get(p.pid)
+            if old_sm is None:
+                sm = cpu_machine_f
+            else:
+                sm = (
+                    _PROC_CPU_EWMA_ALPHA * cpu_machine_f
+                    + (1.0 - _PROC_CPU_EWMA_ALPHA) * old_sm
+                )
+            _PROC_CPU_EWMA[p.pid] = sm
+            out_pids.add(p.pid)
             out.append(
                 {
                     "pid": p.pid,
                     "name": name,
                     "cpu_percent": round(cpu, 1),
                     "cpu_percent_machine": cpu_machine,
+                    "cpu_percent_system_monitor": round(sm, 1),
                     "memory_percent": round(mem, 1),
                     "memory_rss": rss,
                 }
             )
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             continue
+    for pid in list(_PROC_CPU_EWMA.keys()):
+        if pid not in out_pids:
+            del _PROC_CPU_EWMA[pid]
     return out
 
 
@@ -802,7 +903,9 @@ _PROCESS_DETAIL_ATTRS: tuple[str, ...] = (
 )
 
 
-def collect_process_detail(pid: int) -> dict[str, Any]:
+def collect_process_detail(
+    pid: int, process_cpu_divisor: int | None = None
+) -> dict[str, Any]:
     """Return JSON-friendly fields for a live PID, or ``{"error": "no_such_process"}``."""
     out: dict[str, Any] = {"pid": int(pid), "ts": time.time()}
     try:
@@ -874,7 +977,7 @@ def collect_process_detail(pid: int) -> dict[str, Any]:
         except Exception:
             pass
 
-    n_cpu = psutil.cpu_count(logical=True) or 1
+    n_cpu = _n_cpu_for_process_percent(process_cpu_divisor)
     cpu_p = out.get("cpu_percent")
     if isinstance(cpu_p, (int, float)):
         out["cpu_percent_machine"] = round(float(cpu_p) / n_cpu, 1)
@@ -2059,6 +2162,7 @@ def collect_snapshot(
     include_docker_containers: bool = True,
     include_docker_images: bool = True,
     include_docker_volumes: bool = True,
+    process_cpu_divisor: int | None = None,
 ) -> dict[str, Any]:
     """Build one metrics snapshot. cpu_sample_interval None = non-blocking (may be 0 first call).
 
@@ -2127,7 +2231,9 @@ def collect_snapshot(
     data["thermal"] = _thermal_sensors() if include_thermal else None
     data["fans"] = _fan_sensors() if include_fans else None
     data["processes"] = (
-        _top_processes(process_sample_limit) if include_processes else []
+        _top_processes(process_sample_limit, process_cpu_divisor)
+        if include_processes
+        else []
     )
 
     want_docker = (

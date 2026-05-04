@@ -119,9 +119,30 @@
         <label for="proc-cpu-scale-select" class="mc-settings-label">Process CPU column</label>
         <select id="proc-cpu-scale-select" class="mc-theme-select mc-settings-control" aria-label="How CPU % is scaled in the top processes table">
           <option value="machine" selected>All CPUs (like Compute tile)</option>
+          <option value="system_monitor">GNOME System Monitor-style (smoothed)</option>
           <option value="per_core">Per logical CPU (can exceed 100%)</option>
         </select>
       </div>
+      <fieldset class="mc-settings-fieldset">
+        <legend class="mc-settings-legend">CPU layout (for process CPU %)</legend>
+        <p id="cpu-topology-detected-line" class="mc-settings-hint"></p>
+        <div class="mc-settings-field">
+          <label for="cpu-topology-sockets-select" class="mc-settings-label">CPU packages (sockets)</label>
+          <select id="cpu-topology-sockets-select" class="mc-theme-select mc-settings-control" aria-label="Number of CPU sockets or packages"></select>
+        </div>
+        <div class="mc-settings-field">
+          <label for="cpu-topology-cores-select" class="mc-settings-label">Cores per socket</label>
+          <select id="cpu-topology-cores-select" class="mc-theme-select mc-settings-control" aria-label="Physical cores per CPU package"></select>
+        </div>
+        <div class="mc-settings-field">
+          <label for="cpu-topology-threads-select" class="mc-settings-label">Threads per core</label>
+          <select id="cpu-topology-threads-select" class="mc-theme-select mc-settings-control" aria-label="Logical threads per physical core"></select>
+        </div>
+        <div class="mc-settings-backup-actions">
+          <button type="button" id="cpu-topology-reset-btn" class="mc-settings-action-btn">Detect / reset to hardware</button>
+        </div>
+        <p class="mc-settings-hint">Used as divisor (sockets × cores × threads) for &ldquo;All CPUs&rdquo; process CPU, matching server-side scaling.</p>
+      </fieldset>
       <div class="mc-settings-field">
         <label for="net-rate-unit-select" class="mc-settings-label">Network throughput</label>
         <select id="net-rate-unit-select" class="mc-theme-select mc-settings-control" aria-label="Display interface throughput in bytes per second, bits per second, or both">

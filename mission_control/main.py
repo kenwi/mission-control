@@ -25,6 +25,7 @@ from mission_control.metrics import (
     collect_snapshot,
     collect_thermal_detail,
     collect_zpool_detail,
+    detect_cpu_topology,
 )
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
@@ -44,6 +45,12 @@ async def index() -> FileResponse:
 @app.get("/api/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/api/cpu-topology")
+def cpu_topology() -> dict:
+    """Detected CPU packages, cores per package, threads per core, and logical CPU count."""
+    return detect_cpu_topology()
  
 
 @app.get("/api/metrics")
@@ -62,6 +69,12 @@ def metrics(
     operations: bool = Query(True),
     mounts: bool = Query(True),
     zfs: bool = Query(True),
+    proc_cpu_divisor: int | None = Query(
+        None,
+        ge=1,
+        le=4096,
+        description="Sockets × cores × threads for process CPU %% (omit to use live logical count).",
+    ),
 ) -> dict:
     global _slow_last
     now = time.time()
@@ -87,6 +100,7 @@ def metrics(
         include_docker_containers=docker_containers,
         include_docker_images=docker_images,
         include_docker_volumes=docker_volumes,
+        process_cpu_divisor=proc_cpu_divisor,
     )
     return sample
 
@@ -188,10 +202,18 @@ def docker_volume_detail(
 
 
 @app.get("/api/process/{pid}")
-def process_detail(pid: int) -> dict:
+def process_detail(
+    pid: int,
+    proc_cpu_divisor: int | None = Query(
+        None,
+        ge=1,
+        le=4096,
+        description="Sockets × cores × threads for cpu_percent_machine (omit = auto).",
+    ),
+) -> dict:
     if pid < 1:
         raise HTTPException(status_code=400, detail="Invalid PID")
-    data = collect_process_detail(pid)
+    data = collect_process_detail(pid, proc_cpu_divisor)
     if data.get("error") == "no_such_process":
         raise HTTPException(status_code=404, detail="No such process")
     return data
@@ -218,6 +240,12 @@ async def stream(
         ge=0,
         le=100_000,
         description="Top-N processes by sample heuristic; 0 = all processes.",
+    ),
+    proc_cpu_divisor: int | None = Query(
+        None,
+        ge=1,
+        le=4096,
+        description="Sockets × cores × threads for process CPU %%.",
     ),
 ):
     """SSE: live metrics; `interval` is seconds between snapshots (0.25–30).
@@ -248,6 +276,7 @@ async def stream(
             include_docker_containers=docker_containers,
             include_docker_images=docker_images,
             include_docker_volumes=docker_volumes,
+            process_cpu_divisor=proc_cpu_divisor,
         )
         while True:
             now = time.time()
@@ -273,6 +302,7 @@ async def stream(
                 include_docker_containers=docker_containers,
                 include_docker_images=docker_images,
                 include_docker_volumes=docker_volumes,
+                process_cpu_divisor=proc_cpu_divisor,
             )
             line = "data: " + json.dumps(snap) + "\n\n"
             yield line.encode("utf-8")
