@@ -1781,6 +1781,240 @@ class DiskIoState:
         return {**current, "rates": rates}
 
 
+_DOCKER_CONTAINER_ID_RE = re.compile(r"^[a-fA-F0-9]{12,64}$")
+_DOCKER_VOLUME_NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_.\-]{0,253}$")
+
+
+def _docker_run_capture(
+    argv: list[str], timeout: float = 25.0
+) -> tuple[str, str | None]:
+    """Run docker CLI; return (stdout, error_message)."""
+    try:
+        p = subprocess.run(
+            argv,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            shell=False,
+        )
+    except FileNotFoundError:
+        return "", "Docker executable not found"
+    except subprocess.TimeoutExpired:
+        return "", "Docker command timed out"
+    except OSError as e:
+        return "", str(e)[:240]
+
+    out = p.stdout or ""
+    if p.returncode != 0:
+        err = (p.stderr or p.stdout or "").strip()[:500]
+        return "", err or f"docker exited with code {p.returncode}"
+    return out, None
+
+
+def _docker_ndjson_rows(argv: list[str], timeout: float = 25.0) -> tuple[list[dict[str, Any]], str | None]:
+    """Parse one JSON object per line from a docker --format '{{json .}}' command."""
+    raw, err = _docker_run_capture(argv, timeout=timeout)
+    if err:
+        return [], err
+    rows: list[dict[str, Any]] = []
+    for line in raw.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            rows.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+    return rows, None
+
+
+def _docker_first_name(names_field: Any) -> str:
+    if isinstance(names_field, list) and names_field:
+        n = str(names_field[0])
+    elif isinstance(names_field, str):
+        n = names_field
+    else:
+        return ""
+    n = n.strip()
+    if n.startswith("/"):
+        n = n[1:]
+    return n.split("/")[-1] if n else ""
+
+
+def _normalize_docker_container_rows(raw: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for r in raw:
+        cid = str(r.get("ID") or "").strip()
+        if not cid:
+            continue
+        short = cid[:12] if len(cid) >= 12 else cid
+        out.append(
+            {
+                "id": cid,
+                "id_short": short,
+                "name": _docker_first_name(r.get("Names")),
+                "image": str(r.get("Image") or ""),
+                "state": str(r.get("State") or ""),
+                "status": str(r.get("Status") or ""),
+                "ports": str(r.get("Ports") or ""),
+                "running_for": str(r.get("RunningFor") or ""),
+                "created": str(r.get("CreatedAt") or ""),
+            }
+        )
+    return out
+
+
+def _normalize_docker_image_rows(raw: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for r in raw:
+        rid = str(r.get("ID") or "").strip()
+        if not rid:
+            continue
+        short = rid[:12] if len(rid) >= 12 else rid
+        repo = str(r.get("Repository") or "")
+        tag = str(r.get("Tag") or "")
+        out.append(
+            {
+                "id": rid,
+                "id_short": short,
+                "repository": repo,
+                "tag": tag,
+                "size": str(r.get("Size") or ""),
+                "created": str(r.get("CreatedAt") or r.get("CreatedSince") or ""),
+                "inspect_ref": rid,
+            }
+        )
+    return out
+
+
+def _normalize_docker_volume_rows(raw: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for r in raw:
+        name = str(r.get("Name") or "").strip()
+        if not name:
+            continue
+        out.append(
+            {
+                "name": name,
+                "driver": str(r.get("Driver") or ""),
+            }
+        )
+    return out
+
+
+def collect_docker_snapshot() -> dict[str, Any] | None:
+    """Containers, images, and volumes via ``docker`` CLI (JSON line format)."""
+    if not shutil.which("docker"):
+        return {
+            "ts": time.time(),
+            "containers": [],
+            "images": [],
+            "volumes": [],
+            "note": "Docker CLI not found on PATH.",
+        }
+    notes: list[str] = []
+    containers: list[dict[str, Any]] = []
+    images: list[dict[str, Any]] = []
+    volumes: list[dict[str, Any]] = []
+
+    c_raw, c_err = _docker_ndjson_rows(
+        ["docker", "container", "ls", "-a", "--no-trunc", "--format", "{{json .}}"]
+    )
+    if c_err:
+        notes.append(c_err)
+    else:
+        containers = _normalize_docker_container_rows(c_raw)
+
+    i_raw, i_err = _docker_ndjson_rows(
+        ["docker", "image", "ls", "-a", "--no-trunc", "--format", "{{json .}}"]
+    )
+    if i_err:
+        notes.append(f"images: {i_err}")
+    else:
+        images = _normalize_docker_image_rows(i_raw)
+
+    v_raw, v_err = _docker_ndjson_rows(["docker", "volume", "ls", "--format", "{{json .}}"])
+    if v_err:
+        notes.append(f"volumes: {v_err}")
+    else:
+        volumes = _normalize_docker_volume_rows(v_raw)
+
+    note = "; ".join(notes) if notes else None
+    return {
+        "ts": time.time(),
+        "containers": containers,
+        "images": images,
+        "volumes": volumes,
+        "note": note,
+    }
+
+
+def collect_docker_container_inspect(container_id: str) -> dict[str, Any] | None:
+    cid = (container_id or "").strip()
+    if not _DOCKER_CONTAINER_ID_RE.match(cid):
+        return None
+    raw, err = _docker_run_capture(
+        ["docker", "container", "inspect", cid],
+        timeout=30.0,
+    )
+    if err or not raw.strip():
+        return None
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+    if isinstance(data, list):
+        return data[0] if data else None
+    if isinstance(data, dict):
+        return data
+    return None
+
+
+def _safe_docker_image_ref(ref: str) -> bool:
+    r = (ref or "").strip()
+    if not r or len(r) > 512 or r.startswith("-"):
+        return False
+    if any(c in r for c in "\n\r\x00;|&`"):
+        return False
+    return True
+
+
+def collect_docker_image_inspect(ref: str) -> dict[str, Any] | None:
+    if not _safe_docker_image_ref(ref):
+        return None
+    r = ref.strip()
+    raw, err = _docker_run_capture(["docker", "image", "inspect", r], timeout=30.0)
+    if err or not raw.strip():
+        return None
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+    if isinstance(data, list):
+        return data[0] if data else None
+    if isinstance(data, dict):
+        return data
+    return None
+
+
+def collect_docker_volume_inspect(name: str) -> dict[str, Any] | None:
+    n = (name or "").strip()
+    if not _DOCKER_VOLUME_NAME_RE.match(n):
+        return None
+    raw, err = _docker_run_capture(["docker", "volume", "inspect", n], timeout=30.0)
+    if err or not raw.strip():
+        return None
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+    if isinstance(data, list):
+        return data[0] if data else None
+    if isinstance(data, dict):
+        return data
+    return None
+
+
 _slow_metrics_cache: dict[str, Any] = {
     "systemd_failed": None,
     "apt_upgradable": None,
@@ -1797,6 +2031,7 @@ def collect_snapshot(
     include_processes: bool = True,
     process_sample_limit: int = 200,
     include_disk_io: bool = True,
+    include_docker: bool = True,
 ) -> dict[str, Any]:
     """Build one metrics snapshot. cpu_sample_interval None = non-blocking (may be 0 first call)."""
     vm = psutil.virtual_memory()
@@ -1843,6 +2078,7 @@ def collect_snapshot(
         "thermal": _thermal_sensors(),
         "fans": _fan_sensors(),
         "processes": _top_processes(process_sample_limit) if include_processes else [],
+        "docker": collect_docker_snapshot() if include_docker else None,
     }
 
     if include_slow:

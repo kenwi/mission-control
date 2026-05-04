@@ -437,6 +437,69 @@
       </div>
     </section>
 
+    <section class="panel panel-wide" data-panel-id="containers" aria-labelledby="panel-title-containers">
+      <div class="panel-head">
+        <button type="button" class="panel-drag" draggable="true" aria-label="Drag to reorder section" title="Drag to reorder">≡</button>
+        <h2
+          id="panel-title-containers"
+          class="panel-title"
+          role="button"
+          tabindex="0"
+          aria-expanded="true"
+          aria-controls="panel-body-containers"
+          aria-label="Collapse Containers"
+        >Containers</h2>
+      </div>
+      <div class="panel-body" id="panel-body-containers">
+        <p id="docker-panel-note" class="tile-meta mc-docker-panel-note" hidden></p>
+        <div class="storage-subsection" id="docker-containers-subsection">
+          <div
+            class="storage-subsection-head"
+            role="button"
+            tabindex="0"
+            aria-expanded="true"
+            aria-controls="docker-containers-body"
+            aria-label="Collapse Docker containers"
+          >
+            <h3 class="storage-subheading" id="docker-containers-heading">Containers</h3>
+          </div>
+          <div id="docker-containers-body" class="storage-subsection-body">
+            <div id="docker-containers-table" class="table-wrap"></div>
+          </div>
+        </div>
+        <div class="storage-subsection" id="docker-images-subsection">
+          <div
+            class="storage-subsection-head"
+            role="button"
+            tabindex="0"
+            aria-expanded="true"
+            aria-controls="docker-images-body"
+            aria-label="Collapse Docker images"
+          >
+            <h3 class="storage-subheading" id="docker-images-heading">Images</h3>
+          </div>
+          <div id="docker-images-body" class="storage-subsection-body">
+            <div id="docker-images-table" class="table-wrap"></div>
+          </div>
+        </div>
+        <div class="storage-subsection" id="docker-volumes-subsection">
+          <div
+            class="storage-subsection-head"
+            role="button"
+            tabindex="0"
+            aria-expanded="true"
+            aria-controls="docker-volumes-body"
+            aria-label="Collapse Docker volumes"
+          >
+            <h3 class="storage-subheading" id="docker-volumes-heading">Volumes</h3>
+          </div>
+          <div id="docker-volumes-body" class="storage-subsection-body">
+            <div id="docker-volumes-table" class="table-wrap"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
     <section class="panel panel-wide" data-panel-id="processes" aria-labelledby="panel-title-processes">
       <div class="panel-head">
         <button type="button" class="panel-drag" draggable="true" aria-label="Drag to reorder section" title="Drag to reorder">≡</button>
@@ -577,6 +640,23 @@
     </div>
     <div id="net-detail-body" class="mc-modal-body"></div>
   </div>
+
+    <div id="docker-detail-backdrop" class="mc-modal-backdrop" hidden aria-hidden="true"></div>
+    <div
+      id="docker-detail-dialog"
+      class="mc-modal"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="docker-detail-title"
+      hidden
+      aria-hidden="true"
+    >
+      <div class="mc-modal-head">
+        <h2 id="docker-detail-title" class="mc-modal-title">Docker</h2>
+        <button type="button" id="docker-detail-close" class="mc-modal-close" aria-label="Close Docker details">×</button>
+      </div>
+      <div id="docker-detail-body" class="mc-modal-body"></div>
+    </div>
 
   <script src="/assets/app.js" defer></script>
 </body>

@@ -15,6 +15,9 @@ from mission_control.metrics import (
     DiskIoState,
     NetRateState,
     collect_block_device_detail,
+    collect_docker_container_inspect,
+    collect_docker_image_inspect,
+    collect_docker_volume_inspect,
     collect_interface_detail,
     collect_mount_detail,
     collect_process_detail,
@@ -48,6 +51,7 @@ def metrics(
     processes: bool = Query(True),
     proc_limit: int = Query(200, ge=0, le=100_000),
     disk_io: bool = Query(True),
+    docker: bool = Query(True),
 ) -> dict:
     global _slow_last
     now = time.time()
@@ -62,6 +66,7 @@ def metrics(
         include_processes=processes,
         process_sample_limit=proc_limit,
         include_disk_io=disk_io,
+        include_docker=docker,
     )
     return sample
 
@@ -126,6 +131,42 @@ def net_interface_detail(ifname: str) -> dict:
     return data
 
 
+@app.get("/api/docker/container")
+def docker_container_detail(
+    container_id: str = Query(
+        ...,
+        alias="id",
+        min_length=12,
+        max_length=64,
+        description="Container ID",
+    ),
+) -> dict:
+    data = collect_docker_container_inspect(container_id)
+    if data is None:
+        raise HTTPException(status_code=404, detail="Container not found")
+    return data
+
+
+@app.get("/api/docker/image")
+def docker_image_detail(
+    ref: str = Query(..., min_length=1, max_length=512, description="Image ID or reference"),
+) -> dict:
+    data = collect_docker_image_inspect(ref)
+    if data is None:
+        raise HTTPException(status_code=404, detail="Image not found")
+    return data
+
+
+@app.get("/api/docker/volume")
+def docker_volume_detail(
+    name: str = Query(..., min_length=1, max_length=255, description="Volume name"),
+) -> dict:
+    data = collect_docker_volume_inspect(name)
+    if data is None:
+        raise HTTPException(status_code=404, detail="Volume not found")
+    return data
+
+
 @app.get("/api/process/{pid}")
 def process_detail(pid: int) -> dict:
     if pid < 1:
@@ -141,6 +182,7 @@ async def stream(
     interval: float = Query(1.0, ge=0.25, le=30.0),
     processes: bool = Query(True),
     disk_io: bool = Query(True),
+    docker: bool = Query(True),
     proc_limit: int = Query(
         200,
         ge=0,
@@ -152,6 +194,7 @@ async def stream(
 
     Set ``processes=false`` to omit top-process collection (empty ``processes`` list).
     Set ``disk_io=false`` to skip ``/proc/diskstats`` and omit ``disk_io`` in payloads.
+    Set ``docker=false`` to skip Docker CLI calls and omit ``docker`` in payloads.
     Use ``proc_limit=0`` to include every process in the sample (heavier).
     """
 
@@ -165,6 +208,7 @@ async def stream(
             include_processes=processes,
             process_sample_limit=proc_limit,
             include_disk_io=disk_io,
+            include_docker=docker,
         )
         while True:
             now = time.time()
@@ -179,6 +223,7 @@ async def stream(
                 include_processes=processes,
                 process_sample_limit=proc_limit,
                 include_disk_io=disk_io,
+                include_docker=docker,
             )
             line = "data: " + json.dumps(snap) + "\n\n"
             yield line.encode("utf-8")

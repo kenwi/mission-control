@@ -301,13 +301,14 @@ function initSettingsDrawer() {
   });
 }
 
-const PANEL_IDS = ["compute", "thermal", "operations", "storage", "network", "processes"];
+const PANEL_IDS = ["compute", "thermal", "operations", "storage", "network", "containers", "processes"];
 const PANEL_LABELS = {
   compute: "Compute",
   thermal: "Thermal",
   operations: "Operations",
   storage: "Storage",
   network: "Network",
+  containers: "Containers",
   processes: "Top processes",
 };
 const PANEL_VISIBILITY_KEY = "mc-panel-visibility";
@@ -322,6 +323,12 @@ const LISTEN_PORTS_PROTO_FILTER_KEY = "mc-listen-ports-proto-filter";
 const LISTEN_PORTS_FAMILY_FILTER_KEY = "mc-listen-ports-family-filter";
 const STORAGE_MOUNTS_COLLAPSED_KEY = "mc-storage-mounts-collapsed";
 const STORAGE_ZFS_COLLAPSED_KEY = "mc-storage-zfs-collapsed";
+const DOCKER_CONT_COLLAPSED_KEY = "mc-docker-containers-collapsed";
+const DOCKER_IMG_COLLAPSED_KEY = "mc-docker-images-collapsed";
+const DOCKER_VOL_COLLAPSED_KEY = "mc-docker-volumes-collapsed";
+const DOCKER_CONT_SORT_KEYDIR_KEY = "mc-docker-cont-sort-keydir";
+const DOCKER_IMG_SORT_KEYDIR_KEY = "mc-docker-img-sort-keydir";
+const DOCKER_VOL_SORT_KEYDIR_KEY = "mc-docker-vol-sort-keydir";
 
 function loadPanelVisibility() {
   const d = {};
@@ -378,7 +385,7 @@ function initPanelVisibilityControls() {
       next[id] = input.checked;
       savePanelVisibility(next);
       applyPanelVisibility();
-      if (id === "processes" || id === "storage") connectMetricsStream();
+      if (id === "processes" || id === "storage" || id === "containers") connectMetricsStream();
     });
   }
   applyPanelVisibility();
@@ -526,6 +533,14 @@ function streamIncludeDiskIo() {
   return true;
 }
 
+function streamIncludeDocker() {
+  const section = document.querySelector('section.panel[data-panel-id="containers"]');
+  if (!section) return true;
+  if (section.hidden) return false;
+  if (section.classList.contains("is-collapsed")) return false;
+  return true;
+}
+
 /** Max processes to pull from the server on each snapshot (0 = full machine scan). */
 function streamProcSampleLimit() {
   const el = document.getElementById("proc-limit");
@@ -551,8 +566,9 @@ function connectMetricsStream() {
   const sec = loadUpdateInterval();
   const procs = streamIncludeProcesses();
   const diskIo = streamIncludeDiskIo();
+  const dock = streamIncludeDocker();
   const procLimit = streamProcSampleLimit();
-  const u = `/api/stream?interval=${encodeURIComponent(String(sec))}&processes=${procs}&disk_io=${diskIo}&proc_limit=${encodeURIComponent(String(procLimit))}`;
+  const u = `/api/stream?interval=${encodeURIComponent(String(sec))}&processes=${procs}&disk_io=${diskIo}&docker=${dock}&proc_limit=${encodeURIComponent(String(procLimit))}`;
   metricsEventSource = new EventSource(u);
   metricsEventSource.onmessage = (ev) => {
     try {
@@ -734,6 +750,9 @@ function refreshAllSettingsFromStorage() {
   loadDiskSortKeyDir();
   loadNetSortKeyDir();
   loadListenPortsSortKeyDir();
+  loadDockerContSortKeyDir();
+  loadDockerImgSortKeyDir();
+  loadDockerVolSortKeyDir();
   loadThermalSortKeyDir();
   loadFanSortKeyDir();
   applyStorageDiskIoCollapsed();
@@ -779,6 +798,27 @@ function refreshAllSettingsFromStorage() {
     "Expand ZFS pools",
     "Collapse ZFS pools"
   );
+  applySubsectionCollapsed(
+    DOCKER_CONT_COLLAPSED_KEY,
+    "docker-containers-subsection",
+    "docker-containers-body",
+    "Expand Docker containers",
+    "Collapse Docker containers"
+  );
+  applySubsectionCollapsed(
+    DOCKER_IMG_COLLAPSED_KEY,
+    "docker-images-subsection",
+    "docker-images-body",
+    "Expand Docker images",
+    "Collapse Docker images"
+  );
+  applySubsectionCollapsed(
+    DOCKER_VOL_COLLAPSED_KEY,
+    "docker-volumes-subsection",
+    "docker-volumes-body",
+    "Expand Docker volumes",
+    "Collapse Docker volumes"
+  );
   netRateUnit = loadNetRateUnit();
   const netRateSel = document.getElementById("net-rate-unit-select");
   if (netRateSel) netRateSel.value = netRateUnit;
@@ -821,6 +861,7 @@ function refreshAllSettingsFromStorage() {
   renderFans(lastFans);
   renderAptPackagesTable();
   syncAptPackagesVisibility();
+  renderDockerAll();
 }
 
 function initSettingsBackup() {
@@ -970,7 +1011,7 @@ function togglePanelCollapse(section) {
     /* ignore */
   }
   syncPanelCollapsedUi(section);
-  if (id === "processes" || id === "storage") connectMetricsStream();
+  if (id === "processes" || id === "storage" || id === "containers") connectMetricsStream();
 }
 
 function initPanelLayout() {
@@ -1233,6 +1274,7 @@ let lastDisks = [];
 let lastZfsPools = [];
 let lastNetwork = null;
 let lastListeningPorts = null;
+let lastDocker = null;
 let lastDiskIo = null;
 let lastThermal = null;
 let lastFans = null;
@@ -2129,6 +2171,11 @@ function initModalEscapeToClose() {
       closeBlockDevDetailModal();
       return;
     }
+    const dockerDlg = document.getElementById("docker-detail-dialog");
+    if (dockerDlg && !dockerDlg.hidden) {
+      closeDockerDetailModal();
+      return;
+    }
     const netDlg = document.getElementById("net-detail-dialog");
     if (netDlg && !netDlg.hidden) {
       closeNetDetailModal();
@@ -2896,6 +2943,676 @@ function initListenPortsToolbar() {
     }
     renderListenPortsTableContent();
   });
+}
+
+/** @type {"name"|"state"|"image"|"status"|"ports"|"id_short"|"running_for"} */
+let dockerContSortColumn = "name";
+/** @type {"asc"|"desc"} */
+let dockerContSortDir = "asc";
+
+/** @type {"repository"|"tag"|"id_short"|"size"|"created"} */
+let dockerImgSortColumn = "repository";
+/** @type {"asc"|"desc"} */
+let dockerImgSortDir = "asc";
+
+/** @type {"name"|"driver"} */
+let dockerVolSortColumn = "name";
+/** @type {"asc"|"desc"} */
+let dockerVolSortDir = "asc";
+
+function normalizeDockerContSortColumn(k) {
+  if (
+    k === "name" ||
+    k === "state" ||
+    k === "image" ||
+    k === "status" ||
+    k === "ports" ||
+    k === "id_short" ||
+    k === "running_for"
+  ) {
+    return k;
+  }
+  return "name";
+}
+
+function loadDockerContSortKeyDir() {
+  try {
+    const raw = localStorage.getItem(DOCKER_CONT_SORT_KEYDIR_KEY);
+    if (raw) {
+      const o = JSON.parse(raw);
+      if (o && typeof o === "object") {
+        dockerContSortColumn = normalizeDockerContSortColumn(o.column || o.key);
+        dockerContSortDir = o.dir === "desc" ? "desc" : "asc";
+      }
+    }
+  } catch (_) {
+    /* ignore */
+  }
+}
+
+function saveDockerContSortKeyDir() {
+  try {
+    localStorage.setItem(
+      DOCKER_CONT_SORT_KEYDIR_KEY,
+      JSON.stringify({ column: dockerContSortColumn, dir: dockerContSortDir })
+    );
+  } catch (_) {
+    /* ignore */
+  }
+}
+
+function dockerContSortAriaSort(col) {
+  if (dockerContSortColumn !== col) return "none";
+  return dockerContSortDir === "asc" ? "ascending" : "descending";
+}
+
+function dockerContSortArrowHtml(col) {
+  if (dockerContSortColumn !== col) return "";
+  const ch = dockerContSortDir === "asc" ? "\u2191" : "\u2193";
+  return ` <span class="proc-sort-ind" aria-hidden="true">${ch}</span>`;
+}
+
+function onDockerContSortClick(key) {
+  const c = normalizeDockerContSortColumn(key);
+  if (dockerContSortColumn === c) {
+    dockerContSortDir = dockerContSortDir === "asc" ? "desc" : "asc";
+  } else {
+    dockerContSortColumn = c;
+    dockerContSortDir = "asc";
+  }
+  saveDockerContSortKeyDir();
+  renderDockerContainers();
+}
+
+function cmpDockerContRows(a, b) {
+  const dir = dockerContSortDir === "asc" ? 1 : -1;
+  let cmp = 0;
+  switch (dockerContSortColumn) {
+    case "name":
+      cmp = String(a.name || "").localeCompare(String(b.name || ""), undefined, { sensitivity: "base" });
+      break;
+    case "state":
+      cmp = String(a.state || "").localeCompare(String(b.state || ""), undefined, { sensitivity: "base" });
+      break;
+    case "image":
+      cmp = String(a.image || "").localeCompare(String(b.image || ""), undefined, { sensitivity: "base" });
+      break;
+    case "status":
+      cmp = String(a.status || "").localeCompare(String(b.status || ""), undefined, { sensitivity: "base" });
+      break;
+    case "ports":
+      cmp = String(a.ports || "").localeCompare(String(b.ports || ""), undefined, {
+        sensitivity: "base",
+        numeric: true,
+      });
+      break;
+    case "id_short":
+      cmp = String(a.id_short || "").localeCompare(String(b.id_short || ""), undefined, {
+        sensitivity: "base",
+        numeric: true,
+      });
+      break;
+    case "running_for":
+      cmp = String(a.running_for || "").localeCompare(String(b.running_for || ""), undefined, {
+        sensitivity: "base",
+        numeric: true,
+      });
+      break;
+    default:
+      cmp = 0;
+  }
+  if (cmp !== 0) return dir * cmp;
+  return String(a.name || "").localeCompare(String(b.name || ""), undefined, { sensitivity: "base" });
+}
+
+function normalizeDockerImgSortColumn(k) {
+  if (k === "repository" || k === "tag" || k === "id_short" || k === "size" || k === "created") return k;
+  return "repository";
+}
+
+function loadDockerImgSortKeyDir() {
+  try {
+    const raw = localStorage.getItem(DOCKER_IMG_SORT_KEYDIR_KEY);
+    if (raw) {
+      const o = JSON.parse(raw);
+      if (o && typeof o === "object") {
+        dockerImgSortColumn = normalizeDockerImgSortColumn(o.column || o.key);
+        dockerImgSortDir = o.dir === "desc" ? "desc" : "asc";
+      }
+    }
+  } catch (_) {
+    /* ignore */
+  }
+}
+
+function saveDockerImgSortKeyDir() {
+  try {
+    localStorage.setItem(
+      DOCKER_IMG_SORT_KEYDIR_KEY,
+      JSON.stringify({ column: dockerImgSortColumn, dir: dockerImgSortDir })
+    );
+  } catch (_) {
+    /* ignore */
+  }
+}
+
+function dockerImgSortAriaSort(col) {
+  if (dockerImgSortColumn !== col) return "none";
+  return dockerImgSortDir === "asc" ? "ascending" : "descending";
+}
+
+function dockerImgSortArrowHtml(col) {
+  if (dockerImgSortColumn !== col) return "";
+  const ch = dockerImgSortDir === "asc" ? "\u2191" : "\u2193";
+  return ` <span class="proc-sort-ind" aria-hidden="true">${ch}</span>`;
+}
+
+function onDockerImgSortClick(key) {
+  const c = normalizeDockerImgSortColumn(key);
+  if (dockerImgSortColumn === c) {
+    dockerImgSortDir = dockerImgSortDir === "asc" ? "desc" : "asc";
+  } else {
+    dockerImgSortColumn = c;
+    dockerImgSortDir = "asc";
+  }
+  saveDockerImgSortKeyDir();
+  renderDockerImages();
+}
+
+function cmpDockerImgRows(a, b) {
+  const dir = dockerImgSortDir === "asc" ? 1 : -1;
+  let cmp = 0;
+  switch (dockerImgSortColumn) {
+    case "repository":
+      cmp = String(a.repository || "").localeCompare(String(b.repository || ""), undefined, {
+        sensitivity: "base",
+      });
+      break;
+    case "tag":
+      cmp = String(a.tag || "").localeCompare(String(b.tag || ""), undefined, { sensitivity: "base" });
+      break;
+    case "id_short":
+      cmp = String(a.id_short || "").localeCompare(String(b.id_short || ""), undefined, {
+        sensitivity: "base",
+        numeric: true,
+      });
+      break;
+    case "size":
+      cmp = String(a.size || "").localeCompare(String(b.size || ""), undefined, {
+        sensitivity: "base",
+        numeric: true,
+      });
+      break;
+    case "created":
+      cmp = String(a.created || "").localeCompare(String(b.created || ""), undefined, {
+        sensitivity: "base",
+        numeric: true,
+      });
+      break;
+    default:
+      cmp = 0;
+  }
+  if (cmp !== 0) return dir * cmp;
+  return String(a.repository || "").localeCompare(String(b.repository || ""), undefined, { sensitivity: "base" });
+}
+
+function normalizeDockerVolSortColumn(k) {
+  if (k === "name" || k === "driver") return k;
+  return "name";
+}
+
+function loadDockerVolSortKeyDir() {
+  try {
+    const raw = localStorage.getItem(DOCKER_VOL_SORT_KEYDIR_KEY);
+    if (raw) {
+      const o = JSON.parse(raw);
+      if (o && typeof o === "object") {
+        dockerVolSortColumn = normalizeDockerVolSortColumn(o.column || o.key);
+        dockerVolSortDir = o.dir === "desc" ? "desc" : "asc";
+      }
+    }
+  } catch (_) {
+    /* ignore */
+  }
+}
+
+function saveDockerVolSortKeyDir() {
+  try {
+    localStorage.setItem(
+      DOCKER_VOL_SORT_KEYDIR_KEY,
+      JSON.stringify({ column: dockerVolSortColumn, dir: dockerVolSortDir })
+    );
+  } catch (_) {
+    /* ignore */
+  }
+}
+
+function dockerVolSortAriaSort(col) {
+  if (dockerVolSortColumn !== col) return "none";
+  return dockerVolSortDir === "asc" ? "ascending" : "descending";
+}
+
+function dockerVolSortArrowHtml(col) {
+  if (dockerVolSortColumn !== col) return "";
+  const ch = dockerVolSortDir === "asc" ? "\u2191" : "\u2193";
+  return ` <span class="proc-sort-ind" aria-hidden="true">${ch}</span>`;
+}
+
+function onDockerVolSortClick(key) {
+  const c = normalizeDockerVolSortColumn(key);
+  if (dockerVolSortColumn === c) {
+    dockerVolSortDir = dockerVolSortDir === "asc" ? "desc" : "asc";
+  } else {
+    dockerVolSortColumn = c;
+    dockerVolSortDir = "asc";
+  }
+  saveDockerVolSortKeyDir();
+  renderDockerVolumes();
+}
+
+function cmpDockerVolRows(a, b) {
+  const dir = dockerVolSortDir === "asc" ? 1 : -1;
+  let cmp = 0;
+  switch (dockerVolSortColumn) {
+    case "name":
+      cmp = String(a.name || "").localeCompare(String(b.name || ""), undefined, { sensitivity: "base" });
+      break;
+    case "driver":
+      cmp = String(a.driver || "").localeCompare(String(b.driver || ""), undefined, { sensitivity: "base" });
+      break;
+    default:
+      cmp = 0;
+  }
+  if (cmp !== 0) return dir * cmp;
+  return String(a.name || "").localeCompare(String(b.name || ""), undefined, { sensitivity: "base" });
+}
+
+function renderDockerDetailHtml(obj) {
+  if (!obj) return "<p class=\"tile-meta\">No data.</p>";
+  return (
+    '<details class="proc-detail-raw" open><summary>Docker inspect (JSON)</summary>' +
+    `<pre class="proc-detail-json">${escapeHtml(JSON.stringify(obj, null, 2))}</pre></details>`
+  );
+}
+
+function renderDockerContainers() {
+  const wrap = document.getElementById("docker-containers-table");
+  if (!wrap) return;
+  const data = lastDocker;
+  const rows = data && Array.isArray(data.containers) ? data.containers : [];
+  if (!rows.length) {
+    wrap.innerHTML = "<p class=\"tile-meta\">No containers (or Docker unavailable).</p>";
+    return;
+  }
+  const list = rows.map((r) => ({ ...r }));
+  list.sort(cmpDockerContRows);
+  const body = list
+    .map((row) => {
+      const encId = encodeURIComponent(row.id || "");
+      const nm = row.name || "—";
+      return `<tr class="dock-cont-row" role="button" tabindex="0" data-docker-id="${encId}" title="Container details" aria-label="Open details for container ${escapeHtml(nm)}"><td class="dock-td-name">${escapeHtml(nm)}</td><td class="dock-td">${escapeHtml(row.state || "—")}</td><td class="dock-td-img">${escapeHtml(row.image || "—")}</td><td class="dock-td-status">${escapeHtml(row.status || "—")}</td><td class="dock-td-ports" title="${escapeHtml(row.ports || "")}">${escapeHtml(row.ports || "—")}</td><td class="dock-td-mono">${escapeHtml(row.id_short || "—")}</td><td class="dock-td">${escapeHtml(row.running_for || "—")}</td></tr>`;
+    })
+    .join("");
+  wrap.innerHTML = `<table class="mc-table mc-table-dock" aria-label="Docker containers"><thead><tr>
+      <th class="dock-th dock-cont-sortable" scope="col" data-sort-key="name" role="columnheader" tabindex="0" aria-sort="${dockerContSortAriaSort("name")}">Name${dockerContSortArrowHtml("name")}</th>
+      <th class="dock-th dock-cont-sortable" scope="col" data-sort-key="state" role="columnheader" tabindex="0" aria-sort="${dockerContSortAriaSort("state")}">State${dockerContSortArrowHtml("state")}</th>
+      <th class="dock-th dock-cont-sortable dock-th-img" scope="col" data-sort-key="image" role="columnheader" tabindex="0" aria-sort="${dockerContSortAriaSort("image")}">Image${dockerContSortArrowHtml("image")}</th>
+      <th class="dock-th dock-cont-sortable" scope="col" data-sort-key="status" role="columnheader" tabindex="0" aria-sort="${dockerContSortAriaSort("status")}">Status${dockerContSortArrowHtml("status")}</th>
+      <th class="dock-th dock-cont-sortable dock-th-ports" scope="col" data-sort-key="ports" role="columnheader" tabindex="0" aria-sort="${dockerContSortAriaSort("ports")}">Ports${dockerContSortArrowHtml("ports")}</th>
+      <th class="dock-th dock-cont-sortable dock-td-mono" scope="col" data-sort-key="id_short" role="columnheader" tabindex="0" aria-sort="${dockerContSortAriaSort("id_short")}">ID${dockerContSortArrowHtml("id_short")}</th>
+      <th class="dock-th dock-cont-sortable" scope="col" data-sort-key="running_for" role="columnheader" tabindex="0" aria-sort="${dockerContSortAriaSort("running_for")}">Age${dockerContSortArrowHtml("running_for")}</th>
+    </tr></thead><tbody>${body}</tbody></table>`;
+}
+
+function renderDockerImages() {
+  const wrap = document.getElementById("docker-images-table");
+  if (!wrap) return;
+  const data = lastDocker;
+  const rows = data && Array.isArray(data.images) ? data.images : [];
+  if (!rows.length) {
+    wrap.innerHTML = "<p class=\"tile-meta\">No images (or Docker unavailable).</p>";
+    return;
+  }
+  const list = rows.map((r) => ({ ...r }));
+  list.sort(cmpDockerImgRows);
+  const body = list
+    .map((row) => {
+      const ref = row.inspect_ref || row.id || "";
+      const encRef = encodeURIComponent(ref);
+      const lab = `${row.repository || ""}:${row.tag || ""}`;
+      return `<tr class="dock-img-row" role="button" tabindex="0" data-docker-iref="${encRef}" title="Image details" aria-label="Open details for image ${escapeHtml(lab)}"><td class="dock-td-img">${escapeHtml(row.repository || "—")}</td><td class="dock-td">${escapeHtml(row.tag || "—")}</td><td class="dock-td-mono">${escapeHtml(row.id_short || "—")}</td><td class="dock-td">${escapeHtml(row.size || "—")}</td><td class="dock-td">${escapeHtml(row.created || "—")}</td></tr>`;
+    })
+    .join("");
+  wrap.innerHTML = `<table class="mc-table mc-table-dock" aria-label="Docker images"><thead><tr>
+      <th class="dock-th dock-img-sortable dock-th-img" scope="col" data-sort-key="repository" role="columnheader" tabindex="0" aria-sort="${dockerImgSortAriaSort("repository")}">Repository${dockerImgSortArrowHtml("repository")}</th>
+      <th class="dock-th dock-img-sortable" scope="col" data-sort-key="tag" role="columnheader" tabindex="0" aria-sort="${dockerImgSortAriaSort("tag")}">Tag${dockerImgSortArrowHtml("tag")}</th>
+      <th class="dock-th dock-img-sortable dock-td-mono" scope="col" data-sort-key="id_short" role="columnheader" tabindex="0" aria-sort="${dockerImgSortAriaSort("id_short")}">ID${dockerImgSortArrowHtml("id_short")}</th>
+      <th class="dock-th dock-img-sortable" scope="col" data-sort-key="size" role="columnheader" tabindex="0" aria-sort="${dockerImgSortAriaSort("size")}">Size${dockerImgSortArrowHtml("size")}</th>
+      <th class="dock-th dock-img-sortable" scope="col" data-sort-key="created" role="columnheader" tabindex="0" aria-sort="${dockerImgSortAriaSort("created")}">Created${dockerImgSortArrowHtml("created")}</th>
+    </tr></thead><tbody>${body}</tbody></table>`;
+}
+
+function renderDockerVolumes() {
+  const wrap = document.getElementById("docker-volumes-table");
+  if (!wrap) return;
+  const data = lastDocker;
+  const rows = data && Array.isArray(data.volumes) ? data.volumes : [];
+  if (!rows.length) {
+    wrap.innerHTML = "<p class=\"tile-meta\">No volumes (or Docker unavailable).</p>";
+    return;
+  }
+  const list = rows.map((r) => ({ ...r }));
+  list.sort(cmpDockerVolRows);
+  const body = list
+    .map((row) => {
+      const enc = encodeURIComponent(row.name || "");
+      return `<tr class="dock-vol-row" role="button" tabindex="0" data-docker-vol="${enc}" title="Volume details" aria-label="Open details for volume ${escapeHtml(row.name)}"><td class="dock-td-name">${escapeHtml(row.name || "—")}</td><td class="dock-td">${escapeHtml(row.driver || "—")}</td></tr>`;
+    })
+    .join("");
+  wrap.innerHTML = `<table class="mc-table mc-table-dock" aria-label="Docker volumes"><thead><tr>
+      <th class="dock-th dock-vol-sortable" scope="col" data-sort-key="name" role="columnheader" tabindex="0" aria-sort="${dockerVolSortAriaSort("name")}">Name${dockerVolSortArrowHtml("name")}</th>
+      <th class="dock-th dock-vol-sortable" scope="col" data-sort-key="driver" role="columnheader" tabindex="0" aria-sort="${dockerVolSortAriaSort("driver")}">Driver${dockerVolSortArrowHtml("driver")}</th>
+    </tr></thead><tbody>${body}</tbody></table>`;
+}
+
+function renderDockerAll() {
+  const noteEl = document.getElementById("docker-panel-note");
+  if (noteEl) {
+    if (lastDocker && lastDocker.note) {
+      noteEl.textContent = lastDocker.note;
+      noteEl.hidden = false;
+    } else if (lastDocker === null) {
+      noteEl.textContent =
+        "Docker snapshot omitted while the Containers panel is hidden or collapsed.";
+      noteEl.hidden = false;
+    } else {
+      noteEl.textContent = "";
+      noteEl.hidden = true;
+    }
+  }
+  renderDockerContainers();
+  renderDockerImages();
+  renderDockerVolumes();
+}
+
+function closeDockerDetailModal() {
+  const backdrop = document.getElementById("docker-detail-backdrop");
+  const dialog = document.getElementById("docker-detail-dialog");
+  if (backdrop) {
+    backdrop.hidden = true;
+    backdrop.setAttribute("aria-hidden", "true");
+  }
+  if (dialog) {
+    dialog.hidden = true;
+    dialog.setAttribute("aria-hidden", "true");
+  }
+}
+
+function openDockerContainerDetailModal(containerId, displayName) {
+  const backdrop = document.getElementById("docker-detail-backdrop");
+  const dialog = document.getElementById("docker-detail-dialog");
+  const body = document.getElementById("docker-detail-body");
+  const title = document.getElementById("docker-detail-title");
+  if (!backdrop || !dialog || !body || !title) return;
+  title.textContent = displayName || containerId;
+  body.innerHTML = "<p class=\"tile-meta\">Loading…</p>";
+  backdrop.hidden = false;
+  dialog.hidden = false;
+  backdrop.setAttribute("aria-hidden", "false");
+  dialog.setAttribute("aria-hidden", "false");
+  document.getElementById("docker-detail-close")?.focus();
+  const q = encodeURIComponent(containerId);
+  fetch(`/api/docker/container?id=${q}`)
+    .then((res) => {
+      if (res.status === 404) throw new Error("Container not found.");
+      if (!res.ok) throw new Error(`Request failed (${res.status}).`);
+      return res.json();
+    })
+    .then((d) => {
+      title.textContent = displayName || containerId;
+      body.innerHTML = renderDockerDetailHtml(d);
+    })
+    .catch((err) => {
+      title.textContent = displayName || containerId;
+      body.innerHTML = `<p class="tile-meta">${escapeHtml(err.message || String(err))}</p>`;
+    });
+}
+
+function openDockerImageDetailModal(inspectRef, displayName) {
+  const backdrop = document.getElementById("docker-detail-backdrop");
+  const dialog = document.getElementById("docker-detail-dialog");
+  const body = document.getElementById("docker-detail-body");
+  const title = document.getElementById("docker-detail-title");
+  if (!backdrop || !dialog || !body || !title) return;
+  title.textContent = displayName || inspectRef;
+  body.innerHTML = "<p class=\"tile-meta\">Loading…</p>";
+  backdrop.hidden = false;
+  dialog.hidden = false;
+  backdrop.setAttribute("aria-hidden", "false");
+  dialog.setAttribute("aria-hidden", "false");
+  document.getElementById("docker-detail-close")?.focus();
+  const q = encodeURIComponent(inspectRef);
+  fetch(`/api/docker/image?ref=${q}`)
+    .then((res) => {
+      if (res.status === 404) throw new Error("Image not found.");
+      if (!res.ok) throw new Error(`Request failed (${res.status}).`);
+      return res.json();
+    })
+    .then((d) => {
+      title.textContent = displayName || inspectRef;
+      body.innerHTML = renderDockerDetailHtml(d);
+    })
+    .catch((err) => {
+      title.textContent = displayName || inspectRef;
+      body.innerHTML = `<p class="tile-meta">${escapeHtml(err.message || String(err))}</p>`;
+    });
+}
+
+function openDockerVolumeDetailModal(volName, displayName) {
+  const backdrop = document.getElementById("docker-detail-backdrop");
+  const dialog = document.getElementById("docker-detail-dialog");
+  const body = document.getElementById("docker-detail-body");
+  const title = document.getElementById("docker-detail-title");
+  if (!backdrop || !dialog || !body || !title) return;
+  title.textContent = displayName || volName;
+  body.innerHTML = "<p class=\"tile-meta\">Loading…</p>";
+  backdrop.hidden = false;
+  dialog.hidden = false;
+  backdrop.setAttribute("aria-hidden", "false");
+  dialog.setAttribute("aria-hidden", "false");
+  document.getElementById("docker-detail-close")?.focus();
+  const q = encodeURIComponent(volName);
+  fetch(`/api/docker/volume?name=${q}`)
+    .then((res) => {
+      if (res.status === 404) throw new Error("Volume not found.");
+      if (!res.ok) throw new Error(`Request failed (${res.status}).`);
+      return res.json();
+    })
+    .then((d) => {
+      title.textContent = displayName || volName;
+      body.innerHTML = renderDockerDetailHtml(d);
+    })
+    .catch((err) => {
+      title.textContent = displayName || volName;
+      body.innerHTML = `<p class="tile-meta">${escapeHtml(err.message || String(err))}</p>`;
+    });
+}
+
+function initDockerSortHeaderClicks() {
+  const host = document.getElementById("panel-body-containers");
+  if (!host || host.dataset.dockerSortBound === "1") return;
+  host.dataset.dockerSortBound = "1";
+  host.addEventListener("click", (e) => {
+    const tc = e.target.closest("th.dock-cont-sortable[data-sort-key]");
+    if (tc && host.contains(tc)) {
+      onDockerContSortClick(tc.getAttribute("data-sort-key") || "");
+      return;
+    }
+    const ti = e.target.closest("th.dock-img-sortable[data-sort-key]");
+    if (ti && host.contains(ti)) {
+      onDockerImgSortClick(ti.getAttribute("data-sort-key") || "");
+      return;
+    }
+    const tv = e.target.closest("th.dock-vol-sortable[data-sort-key]");
+    if (tv && host.contains(tv)) {
+      onDockerVolSortClick(tv.getAttribute("data-sort-key") || "");
+    }
+  });
+  host.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter" && e.key !== " ") return;
+    const tc = e.target.closest("th.dock-cont-sortable[data-sort-key]");
+    if (tc && host.contains(tc)) {
+      e.preventDefault();
+      onDockerContSortClick(tc.getAttribute("data-sort-key") || "");
+      return;
+    }
+    const ti = e.target.closest("th.dock-img-sortable[data-sort-key]");
+    if (ti && host.contains(ti)) {
+      e.preventDefault();
+      onDockerImgSortClick(ti.getAttribute("data-sort-key") || "");
+      return;
+    }
+    const tv = e.target.closest("th.dock-vol-sortable[data-sort-key]");
+    if (tv && host.contains(tv)) {
+      e.preventDefault();
+      onDockerVolSortClick(tv.getAttribute("data-sort-key") || "");
+    }
+  });
+}
+
+function initDockerContainersRowClicks() {
+  const wrap = document.getElementById("docker-containers-table");
+  if (!wrap || wrap.dataset.dockerRowBound === "1") return;
+  wrap.dataset.dockerRowBound = "1";
+  wrap.addEventListener("click", (e) => {
+    const tr = e.target.closest("tbody tr.dock-cont-row[data-docker-id]");
+    if (!tr || !wrap.contains(tr)) return;
+    const id = decodeURIComponent(tr.getAttribute("data-docker-id") || "");
+    if (!id) return;
+    openDockerContainerDetailModal(id, tr.querySelector(".dock-td-name")?.textContent || "");
+  });
+  wrap.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter" && e.key !== " ") return;
+    const tr = e.target.closest("tbody tr.dock-cont-row[data-docker-id]");
+    if (!tr || !wrap.contains(tr)) return;
+    e.preventDefault();
+    const id = decodeURIComponent(tr.getAttribute("data-docker-id") || "");
+    if (!id) return;
+    openDockerContainerDetailModal(id, tr.querySelector(".dock-td-name")?.textContent || "");
+  });
+}
+
+function initDockerImagesRowClicks() {
+  const wrap = document.getElementById("docker-images-table");
+  if (!wrap || wrap.dataset.dockerRowBound === "1") return;
+  wrap.dataset.dockerRowBound = "1";
+  wrap.addEventListener("click", (e) => {
+    const tr = e.target.closest("tbody tr.dock-img-row[data-docker-iref]");
+    if (!tr || !wrap.contains(tr)) return;
+    const ref = decodeURIComponent(tr.getAttribute("data-docker-iref") || "");
+    if (!ref) return;
+    const tds = tr.querySelectorAll("td");
+    const lab = tds.length >= 2 ? `${tds[0].textContent}:${tds[1].textContent}` : ref;
+    openDockerImageDetailModal(ref, lab);
+  });
+  wrap.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter" && e.key !== " ") return;
+    const tr = e.target.closest("tbody tr.dock-img-row[data-docker-iref]");
+    if (!tr || !wrap.contains(tr)) return;
+    e.preventDefault();
+    const ref = decodeURIComponent(tr.getAttribute("data-docker-iref") || "");
+    if (!ref) return;
+    const tds = tr.querySelectorAll("td");
+    const lab = tds.length >= 2 ? `${tds[0].textContent}:${tds[1].textContent}` : ref;
+    openDockerImageDetailModal(ref, lab);
+  });
+}
+
+function initDockerVolumesRowClicks() {
+  const wrap = document.getElementById("docker-volumes-table");
+  if (!wrap || wrap.dataset.dockerRowBound === "1") return;
+  wrap.dataset.dockerRowBound = "1";
+  wrap.addEventListener("click", (e) => {
+    const tr = e.target.closest("tbody tr.dock-vol-row[data-docker-vol]");
+    if (!tr || !wrap.contains(tr)) return;
+    const name = decodeURIComponent(tr.getAttribute("data-docker-vol") || "");
+    if (!name) return;
+    openDockerVolumeDetailModal(name, tr.querySelector(".dock-td-name")?.textContent || "");
+  });
+  wrap.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter" && e.key !== " ") return;
+    const tr = e.target.closest("tbody tr.dock-vol-row[data-docker-vol]");
+    if (!tr || !wrap.contains(tr)) return;
+    e.preventDefault();
+    const name = decodeURIComponent(tr.getAttribute("data-docker-vol") || "");
+    if (!name) return;
+    openDockerVolumeDetailModal(name, tr.querySelector(".dock-td-name")?.textContent || "");
+  });
+}
+
+function initDockerDetailModal() {
+  const backdrop = document.getElementById("docker-detail-backdrop");
+  const closeBtn = document.getElementById("docker-detail-close");
+  closeBtn?.addEventListener("click", closeDockerDetailModal);
+  backdrop?.addEventListener("click", closeDockerDetailModal);
+}
+
+function initContainersPanel() {
+  loadDockerContSortKeyDir();
+  loadDockerImgSortKeyDir();
+  loadDockerVolSortKeyDir();
+  initDockerSortHeaderClicks();
+  initDockerContainersRowClicks();
+  initDockerImagesRowClicks();
+  initDockerVolumesRowClicks();
+  applySubsectionCollapsed(
+    DOCKER_CONT_COLLAPSED_KEY,
+    "docker-containers-subsection",
+    "docker-containers-body",
+    "Expand Docker containers",
+    "Collapse Docker containers"
+  );
+  initSubsectionCollapse(
+    DOCKER_CONT_COLLAPSED_KEY,
+    "docker-containers-subsection",
+    "docker-containers-body",
+    "Expand Docker containers",
+    "Collapse Docker containers",
+    "dockerContSubBound",
+    undefined
+  );
+  applySubsectionCollapsed(
+    DOCKER_IMG_COLLAPSED_KEY,
+    "docker-images-subsection",
+    "docker-images-body",
+    "Expand Docker images",
+    "Collapse Docker images"
+  );
+  initSubsectionCollapse(
+    DOCKER_IMG_COLLAPSED_KEY,
+    "docker-images-subsection",
+    "docker-images-body",
+    "Expand Docker images",
+    "Collapse Docker images",
+    "dockerImgSubBound",
+    undefined
+  );
+  applySubsectionCollapsed(
+    DOCKER_VOL_COLLAPSED_KEY,
+    "docker-volumes-subsection",
+    "docker-volumes-body",
+    "Expand Docker volumes",
+    "Collapse Docker volumes"
+  );
+  initSubsectionCollapse(
+    DOCKER_VOL_COLLAPSED_KEY,
+    "docker-volumes-subsection",
+    "docker-volumes-body",
+    "Expand Docker volumes",
+    "Collapse Docker volumes",
+    "dockerVolSubBound",
+    undefined
+  );
 }
 
 const DISK_IO_SORT_KEYDIR_KEY = "mc-disk-io-sort-keydir";
@@ -4056,6 +4773,12 @@ const MC_SETTINGS_KEYS = [
   LISTEN_PORTS_SEARCH_KEY,
   LISTEN_PORTS_PROTO_FILTER_KEY,
   LISTEN_PORTS_FAMILY_FILTER_KEY,
+  DOCKER_CONT_COLLAPSED_KEY,
+  DOCKER_IMG_COLLAPSED_KEY,
+  DOCKER_VOL_COLLAPSED_KEY,
+  DOCKER_CONT_SORT_KEYDIR_KEY,
+  DOCKER_IMG_SORT_KEYDIR_KEY,
+  DOCKER_VOL_SORT_KEYDIR_KEY,
   MODAL_WIDTH_KEY,
   CONTENT_LAYOUT_MAX_KEY,
   CONTENT_PADDING_KEY,
@@ -4623,6 +5346,9 @@ function applySnapshot(data) {
   lastDiskIo = data.disk_io ?? null;
   renderDiskIo(lastDiskIo);
 
+  lastDocker = data.docker ?? null;
+  renderDockerAll();
+
   lastProcesses = Array.isArray(data.processes) ? data.processes : [];
   renderProcsTable();
 }
@@ -4664,11 +5390,13 @@ initBlockDevDetailModal();
 initZpoolDetailModal();
 initNetDetailModal();
 initThermalDetailModal();
+initDockerDetailModal();
 initModalEscapeToClose();
 initPanelLayout();
 initPanelVisibilityControls();
 initAptPackagesToggle();
 initStoragePanel();
+initContainersPanel();
 initProcessControls();
 initUpdateIntervalControl();
 

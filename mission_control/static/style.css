@@ -1556,3 +1556,59 @@ table.mc-table {
 
 .pct-warn { color: var(--warn); }
 .pct-crit { color: var(--crit); }
+
+.mc-docker-panel-note:not([hidden]) {
+  color: var(--muted);
+  margin-bottom: 0.75rem;
+}
+
+.mc-table-dock th.dock-cont-sortable,
+.mc-table-dock th.dock-img-sortable,
+.mc-table-dock th.dock-vol-sortable {
+  cursor: pointer;
+  user-select: none;
+}
+
+.mc-table-dock th.dock-cont-sortable:hover,
+.mc-table-dock th.dock-img-sortable:hover,
+.mc-table-dock th.dock-vol-sortable:hover {
+  color: var(--accent);
+}
+
+.mc-table-dock .dock-th-img,
+.mc-table-dock .dock-td-img {
+  max-width: 14rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mc-table-dock .dock-th-ports,
+.mc-table-dock .dock-td-ports {
+  max-width: 12rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mc-table-dock .dock-td-mono {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.mc-table-dock tbody tr.dock-cont-row,
+.mc-table-dock tbody tr.dock-img-row,
+.mc-table-dock tbody tr.dock-vol-row {
+  cursor: pointer;
+}
+
+.mc-table-dock tbody tr.dock-cont-row:hover,
+.mc-table-dock tbody tr.dock-img-row:hover,
+.mc-table-dock tbody tr.dock-vol-row:hover {
+  background: var(--surface-2, rgba(255, 255, 255, 0.04));
+}
+
+.mc-table-dock tbody tr.dock-cont-row:focus-visible,
+.mc-table-dock tbody tr.dock-img-row:focus-visible,
+.mc-table-dock tbody tr.dock-vol-row:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
